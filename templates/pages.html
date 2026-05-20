@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Pages - Signal Dashboard{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom:24px;">Saved Pages<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Saved Pages.</strong> Every URL shared in a Signal group is fetched and snapshotted by the page tracker worker. Click a URL to see its latest snapshot; use <em>Changes</em> to see URLs whose content has changed between snapshots.</span></span></h1>
+
+<div style="text-align:center; margin-bottom:16px;">
+    <a href="/pages" class="btn{% if mode == 'index' %} active-period{% endif %}" style="font-size:0.85em;">All Pages</a>
+    <a href="/pages/changes" class="btn btn-outline" style="font-size:0.85em;">Changes</a>
+</div>
+
+<form method="GET" action="/pages" style="text-align:center; margin-bottom:24px;">
+    <input type="text" name="q" value="{{ query }}" class="search-bar" placeholder="Search page content...">
+</form>
+
+{% if mode == 'search' %}
+    {# ── Search results ── #}
+    {% if indexing is defined and indexing %}
+    <div class="alert" style="background:rgba(0, 240, 255,0.1); border:1px solid #00f0ff; color:#00f0ff; text-align:center;">
+        Page search index is being built. Results may be slower until indexing completes.
+    </div>
+    {% endif %}
+
+    <p style="text-align:center; color:#999; margin-bottom:20px;">
+        {{ total_count }} result{{ 's' if total_count != 1 else '' }} for "<strong>{{ query }}</strong>"
+    </p>
+
+    {% for snap in snapshots %}
+    <div class="card" style="margin-bottom:12px;">
+        <div class="entry-details">
+            <span><strong>URL:</strong> <a href="/pages?url={{ snap.url|urlencode }}">{{ snap.url }}</a></span>
+            <span><strong>Captured:</strong> {{ snap.captured_at|datefmt('%Y-%m-%d %H:%M:%S') }}</span>
+            <span><strong>Group:</strong> {{ snap.group_name or 'Unknown' }}</span>
+            <span><strong>Size:</strong> {{ snap.html_size }} KB</span>
+        </div>
+    </div>
+    {% else %}
+    <p class="empty">No pages match your search.</p>
+    {% endfor %}
+
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}<a href="/pages?q={{ query }}&page={{ page - 1 }}">&laquo; Previous</a>{% endif %}
+        <span class="current">Page {{ page }} of {{ total_pages }}</span>
+        {% if page < total_pages %}<a href="/pages?q={{ query }}&page={{ page + 1 }}">Next &raquo;</a>{% endif %}
+    </div>
+    {% endif %}
+
+{% elif mode == 'detail' %}
+    {# ── Snapshots for a specific URL ── #}
+    <p style="text-align:center; margin-bottom:8px;">
+        <a href="/pages">&laquo; Back to all pages</a>
+    </p>
+    <h2 style="text-align:center; word-break:break-all; margin-bottom:8px; font-size:1em; color:#00f0ff;">
+        <a href="{{ current_url }}" target="_blank" rel="noreferrer">{{ current_url }}</a>
+    </h2>
+    <p style="text-align:center; color:#999; margin-bottom:20px;">{{ snapshots|length }} snapshot{{ 's' if snapshots|length != 1 else '' }}</p>
+
+    <form id="compareForm" action="/pages/compare" method="GET">
+        <div class="card" style="padding:0; overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        {% if snapshots|length >= 2 %}<th style="width:40px;">A</th><th style="width:40px;">B</th>{% endif %}
+                        <th>Captured</th>
+                        <th>Group</th>
+                        <th>Size</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for snap in snapshots %}
+                    <tr>
+                        {% if snapshots|length >= 2 %}
+                        <td style="text-align:center;"><input type="radio" name="a" value="{{ snap.id }}"></td>
+                        <td style="text-align:center;"><input type="radio" name="b" value="{{ snap.id }}"></td>
+                        {% endif %}
+                        <td>{{ snap.captured_at|datefmt('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>{{ snap.group_name or 'Unknown' }}</td>
+                        <td>{{ snap.html_size }} KB</td>
+                        <td>
+                            <a href="/pages/view/{{ snap.id }}" target="_blank" rel="noreferrer">View snapshot</a>
+                            &middot;
+                            <a href="/api/page_html/{{ snap.id }}" target="_blank" rel="noreferrer">View source</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if snapshots|length >= 2 %}
+        <div style="text-align:center; margin-top:12px;">
+            <button type="submit" class="btn">Compare Selected</button>
+        </div>
+        {% endif %}
+    </form>
+
+{% else %}
+    {# ── URL index (default) ── #}
+    {% if urls %}
+    <div class="card" style="padding:0; overflow-x:auto;">
+        <table>
+            <thead>
+                <tr><th>URL</th><th style="text-align:right;">Snapshots</th><th>Latest Capture</th><th>Group</th></tr>
+            </thead>
+            <tbody>
+                {% for item in urls %}
+                <tr>
+                    <td style="word-break:break-all;"><a href="/pages?url={{ item.url|urlencode }}">{{ item.url }}</a></td>
+                    <td style="text-align:right;">{{ item.snapshot_count }}</td>
+                    <td>{{ item.latest|datefmt }}</td>
+                    <td>{{ item.group_name or 'Unknown' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty">No pages captured yet. Pages are saved automatically when URLs are shared in monitored groups.</p>
+    {% endif %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Generated Summaries</title>
+  <style>
+    /* Dark Theme Styles */
+    body {
+      background-color: #121212;
+      color: #e0e0e0;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 900px;
+      margin: 50px auto;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 40px;
+      color: #ffffff;
+    }
+    .card {
+      background-color: #1e1e1e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+    .card h2 {
+      margin-top: 0;
+      color: #ffffff;
+      font-size: 1.5em;
+    }
+    .card pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-family: Consolas, monospace;
+      background-color: #2a2a2a;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+    .error {
+      background-color: #ff4d4d;
+      color: #fff;
+      padding: 10px;
+      text-align: center;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    /* Responsive */
+    @media (max-width: 600px) {
+      .container {
+        margin: 20px;
+        padding: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Generated Summaries</h1>
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+    {% for group in groups %}
+      <div class="card">
+        <h2>Group: {{ group.group_name }}</h2>
+        <pre>{{ group.summary }}</pre>
+      </div>
+    {% endfor %}
+  </div>
+</body>
+</html>

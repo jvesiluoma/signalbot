@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ domain }} - Domain Analytics{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:16px;">
+    <a href="/analytics/domains" style="font-size:0.9em;">&laquo; Back to Domain Analytics</a>
+</div>
+
+<h1 style="text-align:center; margin-bottom:24px;">{{ domain }}<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Domain detail.</strong> Every captured message containing a link to this domain, ordered most recent first. Shows who posted it, which group, the full URL, and any AI analysis of the linked page.</span></span></h1>
+<p style="text-align:center; color:#999; margin-bottom:24px;">{{ total_count }} message{{ 's' if total_count != 1 else '' }} with links to this domain</p>
+
+{% for r in results %}
+<div class="card" style="margin-bottom:16px;">
+    <div class="entry-details" style="margin-bottom:8px;">
+        <span><strong>Time:</strong> {{ r.timestamp|datefmt }}</span>
+        <span><strong>Sender:</strong> {{ r.sender_name }}</span>
+        <span><strong>Group:</strong> {{ r.group_name }}</span>
+        <a href="/messages/{{ r.id }}" style="font-size:0.85em; color:#999;">Details</a>
+    </div>
+    {% if r.message %}
+    <p style="margin:6px 0;">{{ r.message[:300] }}{% if r.message|length > 300 %}...{% endif %}</p>
+    {% endif %}
+    {% if r.url %}
+    <p style="margin:4px 0;">
+        <a href="{{ r.url.split('|')[0] }}" target="_blank" rel="noreferrer">{{ r.url }}</a>
+    </p>
+    {% endif %}
+    {% if r.ai_analysis %}
+    <p style="margin:4px 0; color:#999; font-size:0.9em;"><strong>AI:</strong> {{ r.ai_analysis[:300] }}{% if r.ai_analysis|length > 300 %}...{% endif %}</p>
+    {% endif %}
+</div>
+{% else %}
+<p class="empty">No messages found for this domain.</p>
+{% endfor %}
+
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="/analytics/domains/{{ domain }}?page={{ page - 1 }}">&laquo; Previous</a>
+    {% endif %}
+    <span class="current">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="/analytics/domains/{{ domain }}?page={{ page + 1 }}">Next &raquo;</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

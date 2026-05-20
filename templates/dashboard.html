@@ -1,0 +1,772 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Signal Bot{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/wordcloud@1/src/wordcloud2.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom:24px;">Dashboard<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Dashboard.</strong> Top-level overview of Signal group activity. Shows a live message feed, word clouds for selected time windows, basic counters, per-group activity, top senders, and most-shared domains. Everything here refreshes from the bot's MySQL store.</span></span></h1>
+
+<!-- Live Feed + Dynamic Tag Cloud -->
+<div class="live-feed-row">
+    <div class="card live-feed-card">
+        <h2>Live Feed<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Real-time stream of incoming Signal messages from monitored groups. Icons mark messages with URLs or screenshots. Updates via Server-Sent Events — if the indicator says "connecting..." the stream is not yet live.</span></span> <span id="liveFeedStatus" style="font-size:0.5em; color:#666; font-weight:300;">connecting...</span></h2>
+        <div id="liveFeedContainer" class="live-feed-scroll">
+            <p class="empty" id="liveFeedEmpty">Waiting for messages...</p>
+        </div>
+    </div>
+    <div class="card live-cloud-card">
+        <h2>Latest Group<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Word cloud built from the most recent messages in the group that last received traffic. Refreshes as new messages arrive.</span></span>: <span id="liveCloudGroupName" style="font-weight:300;">--</span></h2>
+        <div class="tagcloud-container">
+            <canvas id="liveGroupCloud" width="400" height="300"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Tag Clouds -->
+<div class="card" style="margin-bottom:20px;">
+    <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:4px;">
+        <h2 style="margin:0;">Word Clouds<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Frequent terms extracted from message text. Use the period buttons to switch time window (1h – 12mo). Common stopwords are filtered out.</span></span></h2>
+        <div id="periodButtons" style="margin-left:auto; display:flex; gap:4px; flex-wrap:wrap;">
+            <button class="btn" data-hours="1" style="font-size:0.8em; padding:4px 10px;">1h</button>
+            <button class="btn" data-hours="24" style="font-size:0.8em; padding:4px 10px;">24h</button>
+            <button class="btn" data-days="7" style="font-size:0.8em; padding:4px 10px;">7d</button>
+            <button class="btn active-period" data-days="30" style="font-size:0.8em; padding:4px 10px;">30d</button>
+            <button class="btn" data-days="180" style="font-size:0.8em; padding:4px 10px;">6mo</button>
+            <button class="btn" data-days="365" style="font-size:0.8em; padding:4px 10px;">12mo</button>
+        </div>
+    </div>
+</div>
+<div class="two-col">
+    <div class="card">
+        <h2>All Groups<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Aggregated word cloud across every monitored group for the selected period.</span></span></h2>
+        <div class="tagcloud-container">
+            <canvas id="allGroupsCloud" width="500" height="350"></canvas>
+        </div>
+    </div>
+    <div class="card">
+        <h2>By Group<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Word cloud for a single group. Pick a group in the dropdown to scope the cloud to messages from that group only.</span></span></h2>
+        <select id="groupSelector" style="margin-bottom:12px; background:#2c2c2c; color:#fff; border:1px solid #444; border-radius:8px; padding:6px 10px; width:100%;">
+            <option value="">-- Select a group --</option>
+        </select>
+        <div class="tagcloud-container">
+            <canvas id="groupCloud" width="500" height="350"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Dashboard Time Window -->
+<div class="card" style="margin-bottom:20px;">
+    <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+        <h2 style="margin:0;">Statistics<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Counters, charts, and lists recomputed over the selected time window. All of the data below (stat cards, activity, groups, senders, domains) updates when you change the period.</span></span></h2>
+        <div id="statPeriodButtons" style="margin-left:auto; display:flex; gap:4px; flex-wrap:wrap;">
+            <button class="btn" data-hours="24" style="font-size:0.8em; padding:4px 10px;">24h</button>
+            <button class="btn" data-days="7" style="font-size:0.8em; padding:4px 10px;">7d</button>
+            <button class="btn" data-days="30" style="font-size:0.8em; padding:4px 10px;">30d</button>
+            <button class="btn" data-days="90" style="font-size:0.8em; padding:4px 10px;">90d</button>
+            <button class="btn active-period" data-days="0" style="font-size:0.8em; padding:4px 10px;">All</button>
+        </div>
+    </div>
+</div>
+
+<!-- Stat Cards -->
+<div class="stat-grid">
+    <div class="stat-card">
+        <div class="number" id="statTotalMessages">{{ stats.total_messages }}</div>
+        <div class="label">Total Messages</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="statUniqueSenders">{{ stats.unique_senders }}</div>
+        <div class="label">Unique Senders</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="statTotalGroups">{{ stats.total_groups }}</div>
+        <div class="label">Active Groups</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="statMessagesToday">{{ stats.messages_today }}</div>
+        <div class="label">Messages Today</div>
+    </div>
+</div>
+
+<!-- Anomaly Alerts -->
+<div class="card" id="anomalyCard" style="display:none; border-color:#ff6b6b;">
+    <h2 style="color:#ff6b6b;">Activity Anomalies<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Flags groups whose recent message volume is unusually high or low vs. their historical baseline. Only shown when anomalies are detected.</span></span></h2>
+    <div id="anomalyList"></div>
+</div>
+
+<!-- Group Mood -->
+<div class="card" id="moodCard" style="display:none;">
+    <h2>Group Mood (Last 24h)<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Sentiment breakdown per group for the past 24 hours (positive / neutral / negative). Computed by the sentiment worker on each message.</span></span></h2>
+    <div id="moodList"></div>
+</div>
+
+<!-- Activity Chart -->
+<div class="card">
+    <h2>Message Activity (Last 30 Days)<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Daily message counts across all monitored groups. Useful for spotting quiet days and activity spikes.</span></span></h2>
+    <div class="chart-container">
+        <canvas id="activityChart"></canvas>
+    </div>
+</div>
+
+<!-- Two-column: Groups + Top Senders -->
+<div class="two-col">
+    <div class="card">
+        <h2>Messages per Group<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Total messages per group over the selected period. Horizontal bars to make long group names readable.</span></span></h2>
+        {% if stats.messages_per_group %}
+        <div class="chart-container">
+            <canvas id="groupsChart"></canvas>
+        </div>
+        {% else %}
+        <p class="empty">No data yet.</p>
+        {% endif %}
+    </div>
+    <div class="card">
+        <h2>Top Senders<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Most prolific senders for the selected period, ranked by message count. Excludes senders without a resolved name.</span></span></h2>
+        {% if stats.top_senders %}
+        <table>
+            <thead>
+                <tr>
+                    <th class="table-rank">#</th>
+                    <th>Sender</th>
+                    <th style="text-align:right;">Messages</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in stats.top_senders %}
+                <tr>
+                    <td class="table-rank">{{ loop.index }}</td>
+                    <td>{% if s.phone %}<a href="/intel/dossier/{{ s.phone|urlencode }}" class="sender-link">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %}</td>
+                    <td style="text-align:right;">{{ s.count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty">No data yet.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Top Domains -->
+<div class="card">
+    <h2>Most Shared Domains<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Domains of URLs posted across all groups. Click a domain to drill into a per-domain detail page with URLs, groups, and timing.</span></span></h2>
+    {% if stats.top_domains %}
+    {% set max_domain = stats.top_domains[0].count if stats.top_domains else 1 %}
+    <table>
+        <thead>
+            <tr>
+                <th class="table-rank">#</th>
+                <th>Domain</th>
+                <th style="text-align:right;">Links</th>
+                <th style="width:40%;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in stats.top_domains %}
+            <tr>
+                <td class="table-rank">{{ loop.index }}</td>
+                <td><a href="/analytics/domains/{{ d.domain }}">{{ d.domain }}</a></td>
+                <td style="text-align:right;">{{ d.count }}</td>
+                <td class="bar-cell">
+                    <div class="bar-bg" style="width:{{ (d.count / max_domain * 100)|round }}%"></div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No URLs shared yet.</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // ── Neon chart theme ─────────────────────────
+    Chart.defaults.color = '#8a7ab3';
+    Chart.defaults.borderColor = 'rgba(164, 106, 255, 0.14)';
+    Chart.defaults.font.family = "'Space Grotesk', 'Inter', system-ui, sans-serif";
+
+    function neonGradient(ctx, chartArea, vertical, stops) {
+        if (!chartArea) return stops[0][1];
+        var g = vertical
+            ? ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top)
+            : ctx.createLinearGradient(chartArea.left, 0, chartArea.right, 0);
+        stops.forEach(function(s) { g.addColorStop(s[0], s[1]); });
+        return g;
+    }
+
+    // Activity Chart
+    var activityData = {{ stats.daily_activity | tojson }};
+    var activityChart = null;
+
+    function renderActivityChart(data) {
+        if (activityChart) { activityChart.destroy(); activityChart = null; }
+        if (!data || data.length === 0) return;
+        activityChart = new Chart(document.getElementById('activityChart'), {
+            type: 'bar',
+            data: {
+                labels: data.map(d => d.day),
+                datasets: [{
+                    label: 'Messages',
+                    data: data.map(d => d.count),
+                    backgroundColor: function(ctx) {
+                        var chart = ctx.chart;
+                        return neonGradient(chart.ctx, chart.chartArea, true, [
+                            [0, 'rgba(0, 240, 255, 0.15)'],
+                            [0.5, 'rgba(164, 106, 255, 0.55)'],
+                            [1, 'rgba(255, 60, 169, 0.9)']
+                        ]);
+                    },
+                    borderColor: '#00f0ff',
+                    borderWidth: 0,
+                    borderRadius: 4,
+                    hoverBackgroundColor: '#3bffd5'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#1b0c33',
+                        borderColor: 'rgba(164, 106, 255, 0.5)',
+                        borderWidth: 1,
+                        titleColor: '#f4ecff',
+                        bodyColor: '#d6c8ef'
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { maxRotation: 45, maxTicksLimit: 15, color: '#8a7ab3' }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: 'rgba(164, 106, 255, 0.08)' },
+                        ticks: { precision: 0, color: '#8a7ab3' }
+                    }
+                }
+            }
+        });
+    }
+
+    // Groups Chart
+    var groupsChart = null;
+    var groupsData = {{ stats.messages_per_group | tojson }};
+
+    function renderGroupsChart(data) {
+        if (groupsChart) { groupsChart.destroy(); groupsChart = null; }
+        if (!data || data.length === 0) return;
+        groupsChart = new Chart(document.getElementById('groupsChart'), {
+            type: 'bar',
+            data: {
+                labels: data.map(g => g.group_name.length > 25 ? g.group_name.slice(0, 25) + '...' : g.group_name),
+                datasets: [{
+                    label: 'Messages',
+                    data: data.map(g => g.count),
+                    backgroundColor: function(ctx) {
+                        var chart = ctx.chart;
+                        return neonGradient(chart.ctx, chart.chartArea, false, [
+                            [0, 'rgba(0, 240, 255, 0.85)'],
+                            [0.5, 'rgba(164, 106, 255, 0.65)'],
+                            [1, 'rgba(255, 60, 169, 0.85)']
+                        ]);
+                    },
+                    borderWidth: 0,
+                    borderRadius: 4,
+                    hoverBackgroundColor: '#b6ff3c'
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#1b0c33',
+                        borderColor: 'rgba(164, 106, 255, 0.5)',
+                        borderWidth: 1,
+                        titleColor: '#f4ecff',
+                        bodyColor: '#d6c8ef'
+                    }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        grid: { color: 'rgba(164, 106, 255, 0.08)' },
+                        ticks: { precision: 0, color: '#8a7ab3' }
+                    },
+                    y: {
+                        grid: { display: false },
+                        ticks: { color: '#d6c8ef' }
+                    }
+                }
+            }
+        });
+    }
+
+    // Initial chart render
+    renderActivityChart(activityData);
+    renderGroupsChart(groupsData);
+
+    // ── Tag Clouds ──────────────────────────────
+    function renderCloud(canvasId, data) {
+        const canvas = document.getElementById(canvasId);
+        if (!data || data.length === 0) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#666';
+            ctx.font = '16px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('No data available', canvas.width / 2, canvas.height / 2);
+            return;
+        }
+        const maxCount = Math.max(...data.map(d => d.count));
+        const minCount = Math.min(...data.map(d => d.count));
+        const range = maxCount - minCount || 1;
+        const minSize = 12;
+        const maxSize = 60;
+
+        // Build word list with normalized weight (0-1) stored for color lookup
+        var wordWeights = {};
+        const wordList = data.map(function(d) {
+            var w = (d.count - minCount) / range; // 0 = least frequent, 1 = most frequent
+            wordWeights[d.word] = w;
+            return [d.word, minSize + w * (maxSize - minSize)];
+        });
+
+        WordCloud(canvas, {
+            list: wordList,
+            gridSize: 8,
+            weightFactor: 1,
+            fontFamily: 'Segoe UI, sans-serif',
+            color: function(word) {
+                var w = wordWeights[word] || 0;
+                // Neon ramp: deep violet → indigo → cyan → lime → hot pink
+                var hue, sat, light;
+                if (w < 0.25) {
+                    hue = 270; sat = 70; light = 55 + w * 30;
+                } else if (w < 0.5) {
+                    hue = 260 - (w - 0.25) * 400; sat = 85; light = 60 + w * 10;
+                } else if (w < 0.75) {
+                    hue = 180 - (w - 0.5) * 320; sat = 90; light = 62 + w * 8;
+                } else {
+                    hue = 100 - (w - 0.75) * 440; sat = 95; light = 66;
+                }
+                return 'hsl(' + Math.round(hue) + ', ' + Math.round(sat) + '%, ' + Math.round(light) + '%)';
+            },
+            backgroundColor: 'transparent',
+            rotateRatio: 0.3,
+            minRotation: -0.5,
+            maxRotation: 0.5,
+        });
+    }
+
+    // ── Tag cloud state & helpers ─────────────
+    var currentTimeParam = 'days=30';
+
+    function replaceCanvas(id) {
+        var old = document.getElementById(id);
+        var c = document.createElement('canvas');
+        c.id = id; c.width = 500; c.height = 350;
+        old.parentNode.replaceChild(c, old);
+    }
+
+    function loadAllGroupsCloud() {
+        replaceCanvas('allGroupsCloud');
+        fetch('/api/tagcloud?' + currentTimeParam)
+            .then(function(r) { return r.json(); })
+            .then(function(data) { renderCloud('allGroupsCloud', data); })
+            .catch(function(err) { console.error('Tag cloud error:', err); });
+    }
+
+    function loadGroupCloud() {
+        var group = document.getElementById('groupSelector').value;
+        if (!group) return;
+        replaceCanvas('groupCloud');
+        fetch('/api/tagcloud?group=' + encodeURIComponent(group) + '&' + currentTimeParam)
+            .then(function(r) { return r.json(); })
+            .then(function(data) { renderCloud('groupCloud', data); })
+            .catch(function(err) { console.error('Group cloud error:', err); });
+    }
+
+    // Period button handler
+    document.getElementById('periodButtons').addEventListener('click', function(e) {
+        var btn = e.target.closest('button');
+        if (!btn) return;
+        document.querySelectorAll('#periodButtons button').forEach(function(b) {
+            b.classList.remove('active-period');
+        });
+        btn.classList.add('active-period');
+        if (btn.getAttribute('data-hours')) {
+            currentTimeParam = 'hours=' + btn.getAttribute('data-hours');
+        } else {
+            currentTimeParam = 'days=' + btn.getAttribute('data-days');
+        }
+        loadAllGroupsCloud();
+        loadGroupCloud();
+    });
+
+    // Initial load
+    loadAllGroupsCloud();
+
+    // Load group list
+    fetch('/api/groups')
+        .then(function(r) { return r.json(); })
+        .then(function(groups) {
+            var sel = document.getElementById('groupSelector');
+            groups.forEach(function(g) {
+                var opt = document.createElement('option');
+                opt.value = g;
+                opt.textContent = g;
+                sel.appendChild(opt);
+            });
+        });
+
+    // Group selector handler
+    document.getElementById('groupSelector').addEventListener('change', function() {
+        loadGroupCloud();
+    });
+
+    // ── Stat Period Buttons ─────────────────────
+    document.getElementById('statPeriodButtons').addEventListener('click', function(e) {
+        var btn = e.target.closest('button');
+        if (!btn) return;
+        document.querySelectorAll('#statPeriodButtons button').forEach(function(b) {
+            b.classList.remove('active-period');
+        });
+        btn.classList.add('active-period');
+
+        var param = '';
+        if (btn.getAttribute('data-hours')) {
+            param = 'hours=' + btn.getAttribute('data-hours');
+        } else if (btn.getAttribute('data-days') !== '0') {
+            param = 'days=' + btn.getAttribute('data-days');
+        }
+
+        fetch('/api/dashboard_stats' + (param ? '?' + param : ''))
+            .then(function(r) { return r.json(); })
+            .then(function(stats) {
+                document.getElementById('statTotalMessages').textContent = stats.total_messages;
+                document.getElementById('statUniqueSenders').textContent = stats.unique_senders;
+                document.getElementById('statTotalGroups').textContent = stats.total_groups;
+                document.getElementById('statMessagesToday').textContent = stats.messages_today;
+                renderActivityChart(stats.daily_activity);
+                renderGroupsChart(stats.messages_per_group);
+            })
+            .catch(function(err) { console.error('Dashboard stats error:', err); });
+    });
+
+    // ── Anomaly Detection ─────────────────────
+    fetch('/api/anomalies')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data || data.length === 0) return;
+            var card = document.getElementById('anomalyCard');
+            var list = document.getElementById('anomalyList');
+            card.style.display = '';
+            data.forEach(function(a) {
+                var severity = a.multiplier >= 5 ? '#ff4d6d' : '#ffb800';
+                var div = document.createElement('div');
+                div.style.cssText = 'padding:10px 14px; border-left:3px solid ' + severity + '; margin-bottom:8px; background:rgba(164,106,255,0.05); border-radius:0 6px 6px 0; box-shadow: inset 0 0 20px -8px ' + severity + ';';
+                div.innerHTML = '<strong>' + escapeHtml(a.group) + '</strong> on ' + a.date +
+                    ' &mdash; <strong>' + a.count + '</strong> messages (' + a.multiplier + 'x the ' + a.average + ' avg)';
+                list.appendChild(div);
+            });
+        })
+        .catch(function(err) { console.error('Anomaly load error:', err); });
+
+    // ── Group Mood ──────────────────────────────
+    fetch('/api/group_mood')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data || typeof data !== 'object') return;
+            var groups = Object.keys(data);
+            if (groups.length === 0) return;
+            var card = document.getElementById('moodCard');
+            var list = document.getElementById('moodList');
+            card.style.display = '';
+            var colors = {positive: '#b6ff3c', negative: '#ff4d6d', neutral: '#a46aff', mixed: '#ffb800'};
+            groups.forEach(function(g) {
+                var d = data[g];
+                if (d.total === 0) return;
+                var div = document.createElement('div');
+                div.style.cssText = 'margin-bottom:10px;';
+                var barHtml = '';
+                ['positive', 'neutral', 'mixed', 'negative'].forEach(function(s) {
+                    var pct = Math.round(d[s] / d.total * 100);
+                    if (pct > 0) {
+                        barHtml += '<div style="display:inline-block;width:' + pct + '%;height:8px;background:' + colors[s] + ';border-radius:4px;" title="' + s + ': ' + pct + '%"></div>';
+                    }
+                });
+                div.innerHTML = '<div style="display:flex;justify-content:space-between;font-size:0.85em;margin-bottom:4px; letter-spacing:0.04em;">' +
+                    '<span style="color:#f4ecff; font-weight:500;">' + escapeHtml(g) + '</span>' +
+                    '<span style="color:#8a7ab3; font-family:JetBrains Mono, monospace; font-size:0.9em;">' + d.total + ' msgs</span>' +
+                    '</div><div style="background:rgba(13,5,32,0.85);border:1px solid rgba(164,106,255,0.14);border-radius:999px;overflow:hidden;display:flex;">' + barHtml + '</div>';
+                list.appendChild(div);
+            });
+        })
+        .catch(function(err) { console.error('Group mood error:', err); });
+
+    // ── Live Feed ────────────────────────────
+    var liveFeedLatestId = 0;
+    var liveFeedCurrentGroup = '';
+    var liveFeedMaxMessages = 30;
+
+    function escapeHtml(str) {
+        // Escapes quotes too, so it is safe in attribute contexts (e.g. href="...").
+        return String(str == null ? '' : str).replace(/[&<>"'`]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c];
+        });
+    }
+
+    function updateFeedStatus(status) {
+        var el = document.getElementById('liveFeedStatus');
+        if (status === 'live') {
+            el.textContent = 'live';
+            el.style.color = '#4caf50';
+        } else if (status === 'error') {
+            el.textContent = 'reconnecting...';
+            el.style.color = '#ff6b6b';
+        } else {
+            el.textContent = 'connecting...';
+            el.style.color = '#666';
+        }
+    }
+
+    function createFeedMsgElement(msg, animate) {
+        var div = document.createElement('div');
+        div.className = 'feed-msg' + (animate ? ' feed-msg-new' : '');
+        div.setAttribute('data-id', msg.id);
+
+        if (animate) {
+            setTimeout(function() { div.classList.remove('feed-msg-new'); }, 3000);
+        }
+
+        var timeStr = '';
+        if (msg.timestamp) {
+            var d = new Date(msg.timestamp);
+            var now = new Date();
+            var timeOpts = {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false};
+            if (d.toDateString() === now.toDateString()) {
+                timeStr = d.toLocaleTimeString([], timeOpts);
+            } else {
+                timeStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], timeOpts);
+            }
+        }
+
+        var indicators = '';
+        if (msg.has_url) indicators += '<span class="feed-indicator" title="Contains URL">\u{1F517}</span>';
+        if (msg.has_screenshot) indicators += '<span class="feed-indicator" title="Has screenshot">\u{1F4F7}</span>';
+
+        var textContent = '';
+        var textClass = 'feed-msg-text';
+        if (msg.message && msg.message.trim()) {
+            textContent = escapeHtml(msg.message);
+        } else if (msg.has_url) {
+            textContent = '(link shared)';
+            textClass += ' feed-placeholder';
+        } else if (msg.has_screenshot) {
+            textContent = '(screenshot)';
+            textClass += ' feed-placeholder';
+        } else if (msg.preview_id) {
+            textContent = (msg.preview_type && msg.preview_type.indexOf('video/') === 0)
+                ? '(video)' : '(image)';
+            textClass += ' feed-placeholder';
+        } else {
+            textContent = '(media)';
+            textClass += ' feed-placeholder';
+        }
+
+        var mediaHtml = '';
+        if (msg.has_screenshot) {
+            mediaHtml = '<div class="feed-msg-media" onclick="this.classList.toggle(\'expanded\')">' +
+                '<img src="/attachments/download/screenshot/' + msg.id + '" alt="Screenshot" loading="lazy">' +
+                '</div>';
+        } else if (msg.preview_id) {
+            // Inline file-attachment media (image/video). Previously these had
+            // no renderer, so an image-only message showed only "(media)".
+            var pUrl = '/attachments/preview/' + encodeURIComponent(msg.preview_id);
+            if (msg.preview_type && msg.preview_type.indexOf('video/') === 0) {
+                mediaHtml = '<div class="feed-msg-media">' +
+                    '<video src="' + pUrl + '" controls preload="metadata" ' +
+                    'style="max-width:100%;max-height:240px;border-radius:6px;"></video></div>';
+            } else {
+                mediaHtml = '<div class="feed-msg-media">' +
+                    '<img src="' + pUrl + '" alt="attachment" loading="lazy" ' +
+                    'style="cursor:zoom-in;" onclick="showOverlay(\'' + pUrl + '\')"></div>';
+            }
+        }
+
+        var captionHtml = '';
+        if (msg.attachment_caption) {
+            captionHtml = '<div class="ai-caption">\u{1F5BC} ' + escapeHtml(msg.attachment_caption) + '</div>';
+        }
+
+        div.innerHTML =
+            '<div class="feed-msg-meta">' +
+                '<span class="feed-msg-time">' + timeStr + '</span>' +
+                '<span class="feed-msg-group">' + escapeHtml(msg.group_name) + '</span>' +
+                '<span class="feed-msg-sender">' + (msg.sender_phone
+                    ? '<a href="/intel/dossier/' + encodeURIComponent(msg.sender_phone) + '" class="sender-link">' + escapeHtml(msg.sender_name) + '</a>'
+                    : escapeHtml(msg.sender_name)) + '</span>' +
+                '<span class="feed-msg-indicators">' + indicators + '</span>' +
+            '</div>' +
+            '<div class="' + textClass + '">' + textContent + '</div>' +
+            mediaHtml + captionHtml;
+
+        return div;
+    }
+
+    function loadLiveGroupCloud(groupName) {
+        document.getElementById('liveCloudGroupName').textContent = groupName;
+        replaceCanvas('liveGroupCloud');
+        var canvas = document.getElementById('liveGroupCloud');
+        canvas.width = 400;
+        canvas.height = 300;
+
+        fetch('/api/tagcloud?group=' + encodeURIComponent(groupName) + '&hours=12')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data || data.length === 0) {
+                    return fetch('/api/tagcloud?group=' + encodeURIComponent(groupName) + '&days=7')
+                        .then(function(r) { return r.json(); });
+                }
+                return data;
+            })
+            .then(function(data) {
+                renderCloud('liveGroupCloud', data);
+            })
+            .catch(function(err) { console.error('Live tag cloud error:', err); });
+    }
+
+    function liveFeedPoll() {
+        fetch('/api/recent_messages?since_id=' + liveFeedLatestId + '&limit=50')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.messages || data.messages.length === 0) return;
+
+                var container = document.getElementById('liveFeedContainer');
+                var emptyEl = document.getElementById('liveFeedEmpty');
+                if (emptyEl) emptyEl.remove();
+
+                var reversed = data.messages.slice().reverse();
+                reversed.forEach(function(msg) {
+                    container.insertBefore(createFeedMsgElement(msg, true), container.firstChild);
+                });
+
+                liveFeedLatestId = data.latest_id;
+
+                var allMsgs = container.querySelectorAll('.feed-msg');
+                for (var i = liveFeedMaxMessages; i < allMsgs.length; i++) {
+                    allMsgs[i].remove();
+                }
+
+                var newestGroup = data.messages[0].group_name;
+                if (newestGroup && newestGroup !== liveFeedCurrentGroup) {
+                    liveFeedCurrentGroup = newestGroup;
+                    loadLiveGroupCloud(newestGroup);
+                }
+                updateFeedStatus('live');
+            })
+            .catch(function(err) {
+                console.error('Live feed poll error:', err);
+                updateFeedStatus('error');
+            });
+    }
+
+    function liveFeedInit() {
+        fetch('/api/recent_messages?limit=30')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.messages && data.messages.length > 0) {
+                    var container = document.getElementById('liveFeedContainer');
+                    var emptyEl = document.getElementById('liveFeedEmpty');
+                    if (emptyEl) emptyEl.remove();
+
+                    data.messages.forEach(function(msg) {
+                        container.appendChild(createFeedMsgElement(msg, false));
+                    });
+
+                    liveFeedLatestId = data.latest_id;
+
+                    var newestGroup = data.messages[0].group_name;
+                    if (newestGroup) {
+                        liveFeedCurrentGroup = newestGroup;
+                        loadLiveGroupCloud(newestGroup);
+                    }
+                }
+                updateFeedStatus('live');
+                // Prefer SSE (/api/stream/messages); fall back to 2s polling
+                // on EventSource error (e.g. >8 concurrent tabs → 503).
+                liveFeedStartSSE();
+            })
+            .catch(function(err) {
+                console.error('Live feed init error:', err);
+                updateFeedStatus('error');
+                setTimeout(liveFeedInit, 5000);
+            });
+    }
+
+    var liveFeedEventSource = null;
+    var liveFeedPollTimer = null;
+
+    function liveFeedHandleMessage(msg) {
+        var container = document.getElementById('liveFeedContainer');
+        if (!container) return;
+        var emptyEl = document.getElementById('liveFeedEmpty');
+        if (emptyEl) emptyEl.remove();
+        container.insertBefore(createFeedMsgElement(msg, true), container.firstChild);
+        if (msg.id && msg.id > liveFeedLatestId) liveFeedLatestId = msg.id;
+        var allMsgs = container.querySelectorAll('.feed-msg');
+        for (var i = liveFeedMaxMessages; i < allMsgs.length; i++) allMsgs[i].remove();
+        if (msg.group_name && msg.group_name !== liveFeedCurrentGroup) {
+            liveFeedCurrentGroup = msg.group_name;
+            loadLiveGroupCloud(msg.group_name);
+        }
+        updateFeedStatus('live');
+    }
+
+    function liveFeedStartSSE() {
+        if (!('EventSource' in window)) {
+            setInterval(liveFeedPoll, 2000);
+            return;
+        }
+        try {
+            var url = '/api/stream/messages?since_id=' + (liveFeedLatestId || 0);
+            liveFeedEventSource = new EventSource(url);
+            liveFeedEventSource.onmessage = function(ev) {
+                try { liveFeedHandleMessage(JSON.parse(ev.data)); } catch (e) { /* heartbeat */ }
+            };
+            liveFeedEventSource.onerror = function() {
+                if (liveFeedEventSource) {
+                    try { liveFeedEventSource.close(); } catch (e) {}
+                    liveFeedEventSource = null;
+                }
+                updateFeedStatus('error');
+                // Fall back to polling after 5s — covers the SSE 503 (too many
+                // concurrent clients) and the EventSource native reconnect storm.
+                if (!liveFeedPollTimer) {
+                    liveFeedPollTimer = setTimeout(function() {
+                        liveFeedPollTimer = null;
+                        liveFeedPoll();
+                        setInterval(liveFeedPoll, 2000);
+                    }, 5000);
+                }
+            };
+        } catch (e) {
+            console.error('SSE init failed; falling back to poll', e);
+            setInterval(liveFeedPoll, 2000);
+        }
+    }
+
+    // Start live feed after charts render
+    setTimeout(liveFeedInit, 500);
+</script>
+{% endblock %}

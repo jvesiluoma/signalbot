@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Page Changes - Signal Dashboard{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom:24px;">Page Changes<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Page Changes.</strong> Every URL whose fetched page content has changed between two snapshots. Use this to see when a tracked article or page is edited, taken down, or updated.</span></span></h1>
+<p style="text-align:center; color:#999; margin-bottom:24px;">{{ total_count }} change{{ 's' if total_count != 1 else '' }} detected</p>
+
+{% if changes %}
+<div class="card" style="padding:0;">
+    <div class="table-responsive">
+    <table>
+        <thead>
+            <tr>
+                <th>URL</th>
+                <th>Change</th>
+                <th>Detected</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in changes %}
+            <tr>
+                <td style="max-width:400px; word-break:break-all;">
+                    <a href="{{ c.url }}" target="_blank" rel="noreferrer">{{ c.url|domain }}</a>
+                </td>
+                <td style="white-space:nowrap;">
+                    <span style="color:{% if c.change_pct > 20 %}#ff6b6b{% elif c.change_pct > 10 %}#ff9800{% else %}#4caf50{% endif %};">
+                        {{ c.change_pct }}%
+                    </span>
+                </td>
+                <td style="white-space:nowrap;">{{ c.detected_at|datefmt }}</td>
+                <td style="white-space:nowrap;">
+                    {% if c.old_id and c.new_id %}
+                    <a href="/pages/compare?a={{ c.old_id }}&b={{ c.new_id }}">View Diff</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% else %}
+<p class="empty">No page changes detected yet. The tracker checks previously seen URLs periodically.</p>
+{% endif %}
+
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="/pages/changes?page={{ page - 1 }}">&laquo; Previous</a>
+    {% endif %}
+    <span class="current">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="/pages/changes?page={{ page + 1 }}">Next &raquo;</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Messages - Signal Dashboard{% endblock %}
+
+{% block content %}
+<style>
+.msg-media{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;}
+.msg-media-item{max-width:220px;}
+.msg-thumb{max-width:170px;max-height:170px;border-radius:6px;display:block;object-fit:cover;background:rgba(128,128,128,0.12);}
+.msg-caption{font-size:0.82em;color:#2a9d6a;margin-top:3px;line-height:1.35;white-space:normal;}
+.msg-caption.muted{color:#888;font-style:italic;}
+.msg-file{font-size:0.85em;}
+.msg-file.muted{color:#888;}
+</style>
+<h1 style="text-align:center; margin-bottom:24px;">Messages<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Messages.</strong> Paginated browser for every captured Signal message. Use the filter bar to narrow by group, sender, keyword, or date range. CSV/JSON export buttons download the current filter. Click a row to open the full message detail (screenshot, AI analysis).</span></span></h1>
+
+<!-- Filter Bar -->
+<form method="GET" action="/messages" class="filter-bar">
+    {% if platforms and platforms|length > 1 %}
+    <select name="platform" class="platform-filter" title="Origin platform">
+        <option value="">All Platforms</option>
+        {% for p in platforms %}
+        <option value="{{ p }}" {% if p == current_platform %}selected{% endif %}>{{ p|platform_label }}</option>
+        {% endfor %}
+    </select>
+    {% endif %}
+    <select name="group">
+        <option value="">All Groups</option>
+        {% for g in groups %}
+        <option value="{{ g }}" {% if g == current_group %}selected{% endif %}>{{ g }}</option>
+        {% endfor %}
+    </select>
+    <select name="sender">
+        <option value="">All Senders</option>
+        {% for s in senders %}
+        <option value="{{ s }}" {% if s == current_sender %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+    </select>
+    <input type="text" name="q" value="{{ current_search }}" placeholder="Search messages...">
+    <input type="date" name="start_date" value="{{ start_date }}" title="From date">
+    <input type="date" name="end_date" value="{{ end_date }}" title="To date">
+    <button type="submit" class="btn">Filter</button>
+    {% if current_group or current_sender or current_platform or current_search or start_date or end_date %}
+    <a href="/messages" style="font-size:0.9em;">Clear filters</a>
+    {% endif %}
+    <span class="result-count">{{ total_count }} message{{ 's' if total_count != 1 else '' }}</span>
+    <label class="compact-toggle"><input type="checkbox" id="compactToggle"> Compact</label>
+    <a href="/api/export/messages?format=csv&group={{ current_group }}&sender={{ current_sender }}&platform={{ current_platform }}&q={{ current_search }}&start_date={{ start_date }}&end_date={{ end_date }}" class="btn btn-sm btn-outline">CSV</a>
+    <a href="/api/export/messages?format=json&group={{ current_group }}&sender={{ current_sender }}&platform={{ current_platform }}&q={{ current_search }}&start_date={{ start_date }}&end_date={{ end_date }}" class="btn btn-sm btn-outline">JSON</a>
+</form>
+
+<!-- Messages Table -->
+{% if messages %}
+<div class="card" style="padding:0;">
+    <div class="table-responsive">
+    <table>
+        <thead>
+            <tr>
+                <th>Src</th>
+                <th>Time</th>
+                <th>Sender</th>
+                <th>Group</th>
+                <th>Message</th>
+                <th>URL</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for msg in messages %}
+            <tr>
+                <td>{{ msg.platform|platform_badge }}</td>
+                <td style="white-space:nowrap;">{{ msg.timestamp|datefmt }}</td>
+                <td style="white-space:nowrap;">{% if msg.sender_phone %}<a href="/intel/dossier/{{ msg.sender_phone|urlencode }}" class="sender-link">{{ msg.sender_name }}</a>{% else %}{{ msg.sender_name }}{% endif %}</td>
+                <td style="white-space:nowrap;">{{ msg.group_name }}</td>
+                <td class="msg-text" title="{{ msg.message }}">
+                    <a href="/messages/{{ msg.id }}" style="color:inherit;text-decoration:none;">
+                    {%- if msg.message and msg.message.strip() -%}
+                        {{ msg.message }}
+                    {%- elif msg.url -%}
+                        <span style="color:#666;font-style:italic;">(link shared)</span>
+                    {%- elif not msg.attachments and not msg.has_screenshot -%}
+                        <span style="color:#666;font-style:italic;">(media)</span>
+                    {%- endif -%}
+                    </a>
+                    {% if msg.attachments %}
+                    <div class="msg-media">
+                        {% for a in msg.attachments %}
+                        <div class="msg-media-item">
+                            {% if a.preview_id and a.content_type.startswith('image/') %}
+                            <img class="msg-thumb" src="/attachments/preview/{{ a.preview_id }}" loading="lazy"
+                                 alt="image attachment" style="cursor:zoom-in;"
+                                 onclick="showOverlay('/attachments/preview/{{ a.preview_id }}')">
+                            {% elif a.preview_id and a.content_type.startswith('video/') %}
+                            <video class="msg-thumb" src="/attachments/preview/{{ a.preview_id }}" controls preload="metadata"></video>
+                            {% elif a.preview_id %}
+                            <a class="msg-file" href="/attachments/preview/{{ a.preview_id }}" target="_blank" rel="noreferrer">📎 {{ a.content_type or 'attachment' }}</a>
+                            {% else %}
+                            <span class="msg-file muted">📎 {{ a.content_type or 'attachment' }} (bytes unavailable)</span>
+                            {% endif %}
+                            {% set _cap = (a.ai_caption or '')|trim %}
+                            {% set _bad = _cap.startswith('[unavailable') %}
+                            {% if _cap and not _bad %}
+                            <div class="msg-caption">🔍 {{ _cap }}</div>
+                            {% elif a.caption_status == 'error' or _bad %}
+                            <div class="msg-caption muted">⚠ image analysis unavailable</div>
+                            {% elif a.caption_status == 'skipped' %}
+                            {# non-captionable attachment type — no analysis line #}
+                            {% else %}
+                            <div class="msg-caption muted">⏳ image analysis pending</div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                        {% if msg.ai_analysis %}
+                        <div class="msg-media-item">
+                            <div class="msg-caption">🔍 {{ msg.ai_analysis|truncate(280) }}</div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% elif msg.has_screenshot %}
+                    <div class="msg-media">
+                        <div class="msg-media-item">
+                            <img class="msg-thumb" src="/api/screenshot/{{ msg.id }}" loading="lazy"
+                                 alt="link screenshot" style="cursor:zoom-in;"
+                                 onclick="showOverlay('/api/screenshot/{{ msg.id }}')">
+                            {% if msg.ai_analysis %}
+                            <div class="msg-caption">🔍 {{ msg.ai_analysis|truncate(280) }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if msg.url %}
+                    <a href="{{ msg.url.split('|')[0] }}" target="_blank" rel="noreferrer" class="msg-url" title="{{ msg.url }}">{{ msg.url.split('|')[0] }}</a>
+                    {% endif %}
+                </td>
+                <td style="white-space:nowrap; text-align:center;">
+                    <button type="button" class="msg-delete-btn" data-id="{{ msg.id }}"
+                            data-preview="{{ (msg.message or msg.url or '(media)')|truncate(80) }}"
+                            title="Delete this message from the database" aria-label="Delete message">🗑</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% else %}
+<p class="empty">No messages found{% if current_group or current_sender or current_search %} matching your filters{% endif %}.</p>
+{% endif %}
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="/messages?page={{ page - 1 }}&group={{ current_group }}&sender={{ current_sender }}&platform={{ current_platform }}&q={{ current_search }}&start_date={{ start_date }}&end_date={{ end_date }}">&laquo; Previous</a>
+    {% endif %}
+    <span class="current">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="/messages?page={{ page + 1 }}&group={{ current_group }}&sender={{ current_sender }}&platform={{ current_platform }}&q={{ current_search }}&start_date={{ start_date }}&end_date={{ end_date }}">Next &raquo;</a>
+    {% endif %}
+</div>
+{% endif %}
+
+<style>
+.msg-delete-btn {
+    background: none; border: none; cursor: pointer; font-size: 1em; line-height: 1;
+    padding: 4px 6px; border-radius: 6px; opacity: 0.45; transition: opacity .15s, background .15s;
+}
+.msg-delete-btn:hover, .msg-delete-btn:focus { opacity: 1; background: rgba(255, 77, 109, 0.18); }
+.msg-delete-btn[disabled] { opacity: 0.25; cursor: default; }
+</style>
+<script>
+document.getElementById('compactToggle').addEventListener('change', function() {
+    document.querySelector('table').classList.toggle('compact', this.checked);
+    localStorage.setItem('messagesCompact', this.checked);
+});
+if (localStorage.getItem('messagesCompact') === 'true') {
+    document.getElementById('compactToggle').checked = true;
+    var tbl = document.querySelector('table');
+    if (tbl) tbl.classList.add('compact');
+}
+
+// Per-row delete (trashcan) — confirm first, then POST /messages/<id>/delete.
+document.querySelectorAll('.msg-delete-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-id');
+        var preview = btn.getAttribute('data-preview') || '';
+        if (!window.confirm('Permanently delete this message from the database?\n\n"' + preview + '"\n\nThis cannot be undone.')) return;
+        btn.disabled = true;
+        fetch('/messages/' + encodeURIComponent(id) + '/delete', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        }).then(function (r) {
+            return r.json().then(function (j) { return { ok: r.ok, body: j }; });
+        }).then(function (res) {
+            if (res.ok && res.body && res.body.ok) {
+                var row = btn.closest('tr');
+                if (row) row.parentNode.removeChild(row);
+            } else {
+                btn.disabled = false;
+                alert('Delete failed: ' + ((res.body && res.body.error) || 'unknown error'));
+            }
+        }).catch(function (e) {
+            btn.disabled = false;
+            alert('Delete failed: ' + e);
+        });
+    });
+});
+</script>
+{% endblock %}

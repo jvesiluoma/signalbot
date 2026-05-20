@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Activity Heatmap - Signal Dashboard{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom:24px;">Activity Heatmap<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Activity Heatmap.</strong> Day-of-week × hour-of-day grid of message counts. Darker cells = more messages. Filter by group or sender to see individual patterns (e.g. who posts at odd hours).</span></span></h1>
+
+<div class="filter-bar" style="justify-content:center;">
+    <select id="heatmapGroup">
+        <option value="">All Groups</option>
+    </select>
+    <select id="heatmapSender">
+        <option value="">All Senders</option>
+    </select>
+    <button class="btn" onclick="loadHeatmap()">Update</button>
+</div>
+
+<div class="card">
+    <p style="color:#999; font-size:0.85em; margin-bottom:12px;">Messages by day of week and hour of day. Darker = more activity.</p>
+    <div class="table-responsive">
+    <table class="heatmap" id="heatmapTable">
+        <thead>
+            <tr>
+                <th></th>
+                <script>
+                    for (var h = 0; h < 24; h++) {
+                        document.write('<th>' + (h < 10 ? '0' : '') + h + '</th>');
+                    }
+                </script>
+            </tr>
+        </thead>
+        <tbody id="heatmapBody">
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    function renderHeatmap(matrix) {
+        var body = document.getElementById('heatmapBody');
+        body.innerHTML = '';
+        var maxVal = 0;
+        for (var d = 0; d < 7; d++) {
+            for (var h = 0; h < 24; h++) {
+                if (matrix[d][h] > maxVal) maxVal = matrix[d][h];
+            }
+        }
+        // Reorder: Mon-Sun instead of Sun-Sat
+        var order = [1, 2, 3, 4, 5, 6, 0];
+        for (var i = 0; i < 7; i++) {
+            var d = order[i];
+            var tr = document.createElement('tr');
+            var th = document.createElement('th');
+            th.textContent = dayNames[d];
+            th.style.textAlign = 'right';
+            th.style.paddingRight = '8px';
+            tr.appendChild(th);
+            for (var h = 0; h < 24; h++) {
+                var td = document.createElement('td');
+                var val = matrix[d][h];
+                td.textContent = val || '';
+                if (maxVal > 0 && val > 0) {
+                    var intensity = val / maxVal;
+                    td.style.backgroundColor = 'rgba(0, 240, 255, ' + (0.1 + intensity * 0.7) + ')';
+                    if (intensity > 0.6) td.style.color = '#fff';
+                }
+                td.title = dayNames[d] + ' ' + (h < 10 ? '0' : '') + h + ':00 — ' + val + ' messages';
+                tr.appendChild(td);
+            }
+            body.appendChild(tr);
+        }
+    }
+
+    function loadHeatmap() {
+        var group = document.getElementById('heatmapGroup').value;
+        var sender = document.getElementById('heatmapSender').value;
+        var params = [];
+        if (group) params.push('group=' + encodeURIComponent(group));
+        if (sender) params.push('sender=' + encodeURIComponent(sender));
+        var url = '/api/activity_heatmap' + (params.length ? '?' + params.join('&') : '');
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                renderHeatmap(data.matrix);
+            })
+            .catch(function(err) { console.error('Heatmap error:', err); });
+    }
+
+    // Populate filters
+    fetch('/api/groups').then(function(r) { return r.json(); }).then(function(groups) {
+        var sel = document.getElementById('heatmapGroup');
+        groups.forEach(function(g) {
+            var opt = document.createElement('option'); opt.value = g; opt.textContent = g;
+            sel.appendChild(opt);
+        });
+    });
+    fetch('/api/senders').then(function(r) { return r.json(); }).then(function(senders) {
+        var sel = document.getElementById('heatmapSender');
+        senders.forEach(function(s) {
+            var opt = document.createElement('option'); opt.value = s; opt.textContent = s;
+            sel.appendChild(opt);
+        });
+    });
+
+    // Initial load
+    loadHeatmap();
+</script>
+{% endblock %}

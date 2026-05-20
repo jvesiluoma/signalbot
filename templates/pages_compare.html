@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Compare Snapshots - Signal Dashboard{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css">
+{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom:24px;">Page Comparison</h1>
+
+<p style="text-align:center; margin-bottom:8px;">
+    <a href="/pages?url={{ snapshot_a.url|urlencode }}">&laquo; Back to snapshots</a>
+</p>
+
+<p style="text-align:center; word-break:break-all; color:#00f0ff; margin-bottom:20px;">{{ snapshot_a.url }}</p>
+
+<div class="two-col" style="margin-bottom:20px;">
+    <div class="card">
+        <h3 style="color:#ff6b6b;">Snapshot A</h3>
+        <p><strong>Captured:</strong> {{ snapshot_a.captured_at|datefmt('%Y-%m-%d %H:%M:%S') }}</p>
+        <p><strong>Group:</strong> {{ snapshot_a.group_name or 'Unknown' }}</p>
+    </div>
+    <div class="card">
+        <h3 style="color:#4CAF50;">Snapshot B</h3>
+        <p><strong>Captured:</strong> {{ snapshot_b.captured_at|datefmt('%Y-%m-%d %H:%M:%S') }}</p>
+        <p><strong>Group:</strong> {{ snapshot_b.group_name or 'Unknown' }}</p>
+    </div>
+</div>
+
+<div id="diffLoading" style="text-align:center; color:#999; padding:40px;">Loading diff...</div>
+<div id="diffOutput"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/diff/dist/diff.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
+<script>
+    Promise.all([
+        fetch('/api/page_html/{{ snapshot_a.id }}').then(function(r) { return r.text(); }),
+        fetch('/api/page_html/{{ snapshot_b.id }}').then(function(r) { return r.text(); })
+    ]).then(function(results) {
+        var htmlA = results[0];
+        var htmlB = results[1];
+        document.getElementById('diffLoading').style.display = 'none';
+
+        var diff = Diff.createTwoFilesPatch(
+            'Snapshot A ({{ snapshot_a.captured_at|datefmt }})',
+            'Snapshot B ({{ snapshot_b.captured_at|datefmt }})',
+            htmlA, htmlB, '', '', {context: 3}
+        );
+
+        var targetElement = document.getElementById('diffOutput');
+        var configuration = {
+            drawFileList: false,
+            matching: 'lines',
+            outputFormat: 'side-by-side',
+            renderNothingWhenEmpty: false,
+        };
+        var diff2htmlUi = new Diff2HtmlUI(targetElement, diff, configuration);
+        diff2htmlUi.draw();
+    }).catch(function(err) {
+        document.getElementById('diffLoading').style.display = 'none';
+        document.getElementById('diffOutput').innerHTML =
+            '<div class="alert alert-error">Failed to load snapshots: ' + err + '</div>';
+    });
+</script>
+{% endblock %}

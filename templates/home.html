@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Combined Message Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background-color: #eaeaea; }
+        .nav { text-align: center; margin-bottom: 20px; }
+        .nav a { margin: 0 15px; text-decoration: none; color: #007bff; font-size: 18px; }
+        h1 { text-align: center; }
+        .meta { font-size: 12px; color: #555; text-align:center; }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="/filtered">Filtered Messages (Last 30 Days)</a>
+        <a href="/attachments">Attachments</a>
+    </div>
+    <h1>Welcome to the Combined Message Dashboard</h1>
+    <p style="text-align: center;">Use the navigation links above to view summaries, filtered messages, or attachments.</p>
+    <p class="meta">LOG_LEVEL={{ log_level }} | DB={{ db_user }}@{{ db_host }}/{{ db_name }} | OLLAMA={{ ollama_url }}</p>
+</body>
+</html>

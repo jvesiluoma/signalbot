@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=1200, initial-scale=1.0, user-scalable=no">
+    <title>Signal Messages</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 20px;
+            background: #121212;
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 20px;
+            background: #1a1a1a;
+            border-bottom: 1px solid #333;
+            height: 44px;
+        }
+        .header-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #00f0ff;
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #666;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #666;
+        }
+        .status-dot.live { background: #4CAF50; }
+        .status-dot.error { background: #ff6b6b; }
+        .feed {
+            height: calc(100vh - 44px);
+            overflow-y: auto;
+            padding: 8px 16px;
+            -webkit-overflow-scrolling: touch;
+        }
+        .feed::-webkit-scrollbar { width: 8px; }
+        .feed::-webkit-scrollbar-track { background: #1a1a1a; }
+        .feed::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+        .msg {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px 8px;
+            border-bottom: 1px solid #2a2a2a;
+            min-height: 56px;
+        }
+        .msg-new {
+            background: rgba(0, 240, 255, 0.06);
+        }
+        .msg-left {
+            flex: 1;
+            min-width: 0;
+        }
+        .msg-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 4px;
+        }
+        .msg-group {
+            display: inline-block;
+            font-size: 15px;
+            font-weight: 600;
+            padding: 2px 10px;
+            border-radius: 12px;
+            background: rgba(0, 240, 255, 0.15);
+            color: #00f0ff;
+            white-space: nowrap;
+            max-width: 250px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        /* Origin tag on every message: SG (Signal) / TG (Telegram) / WA (WhatsApp). */
+        .platform-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 2.1em;
+            padding: 1px 6px;
+            border-radius: 5px;
+            font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            line-height: 1.5;
+            text-transform: uppercase;
+            border: 1px solid currentColor;
+            background: rgba(255, 255, 255, 0.04);
+            box-shadow: 0 0 6px -2px currentColor;
+            user-select: none;
+            white-space: nowrap;
+        }
+        .platform-badge.platform-signal   { color: #7aa2ff; }
+        .platform-badge.platform-telegram { color: #00f0ff; }
+        .platform-badge.platform-whatsapp { color: #b6ff3c; }
+        .platform-badge.platform-unknown  { color: #9a8fb5; }
+        .msg-sender {
+            font-size: 16px;
+            color: #999;
+            white-space: nowrap;
+        }
+        .msg-text {
+            font-size: 18px;
+            line-height: 1.4;
+            color: #ccc;
+            word-break: break-word;
+        }
+        .msg-time {
+            font-size: 14px;
+            color: #555;
+            white-space: nowrap;
+            padding-top: 4px;
+            min-width: 60px;
+            text-align: right;
+        }
+        .msg-url-only { color: #00f0ff; }
+        .msg-link {
+            color: #00f0ff;
+            text-decoration: none;
+        }
+        .msg-thumb {
+            max-height: 80px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-top: 6px;
+        }
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.92);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .overlay img {
+            max-width: 95%;
+            max-height: 95%;
+        }
+        .empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+            font-size: 22px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span class="header-title">Signal Messages</span>
+        <div class="status">
+            <span id="statusText">Connecting</span>
+            <span id="statusDot" class="status-dot"></span>
+        </div>
+    </div>
+    <div id="feed" class="feed">
+        <div class="empty" id="emptyMsg">Loading messages...</div>
+    </div>
+    <div id="overlay" class="overlay" style="display:none;" onclick="closeOverlay()">
+        <img id="overlayImg" src="" alt="Screenshot">
+    </div>
+
+    <script>
+        var latestId = 0;
+        var feedEl = document.getElementById("feed");
+        var emptyMsg = document.getElementById("emptyMsg");
+        var statusDot = document.getElementById("statusDot");
+        var statusText = document.getElementById("statusText");
+
+        function escapeHtml(str) {
+            // Escapes quotes too, so it is safe in attribute contexts (e.g. href="...").
+            return String(str == null ? "" : str).replace(/[&<>"'`]/g, function (c) {
+                return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "`": "&#96;" }[c];
+            });
+        }
+
+        function safeUrl(u) {
+            u = String(u == null ? "" : u).trim();
+            return /^(https?:|mailto:|\/|#)/i.test(u) ? u : "#";
+        }
+
+        var PLATFORM_LABELS = { signal: "Signal", telegram: "Telegram", whatsapp: "WhatsApp" };
+        var PLATFORM_CODES  = { signal: "SG", telegram: "TG", whatsapp: "WA" };
+        function platformBadge(p) {
+            var key = String(p || "signal").toLowerCase();
+            var cls = PLATFORM_LABELS[key] ? "platform-" + key : "platform-unknown";
+            var code = PLATFORM_CODES[key] || "?";
+            var label = PLATFORM_LABELS[key] || key || "unknown";
+            return '<span class="platform-badge ' + cls + '" title="' + escapeHtml(label) + '">' + escapeHtml(code) + '</span>';
+        }
+
+        function truncate(text, maxLen) {
+            if (!text || text.length <= maxLen) return text || "";
+            var cut = text.substring(0, maxLen);
+            var lastSpace = cut.lastIndexOf(" ");
+            if (lastSpace > maxLen * 0.6) cut = cut.substring(0, lastSpace);
+            return cut + "...";
+        }
+
+        function relativeTime(isoStr) {
+            if (!isoStr) return "";
+            var now = Date.now();
+            var then = new Date(isoStr).getTime();
+            var diff = Math.floor((now - then) / 1000);
+            if (diff < 60) return diff + "s";
+            if (diff < 3600) return Math.floor(diff / 60) + "m";
+            if (diff < 86400) return Math.floor(diff / 3600) + "h";
+            return Math.floor(diff / 86400) + "d";
+        }
+
+        function extractDomain(url) {
+            if (!url) return "";
+            try {
+                var match = url.match(/^https?:\/\/([^\/\?#]+)/);
+                return match ? match[1] : url;
+            } catch(e) { return url; }
+        }
+
+        function getDisplayText(msg) {
+            var text = (msg.message || "").trim();
+            if (text) return truncate(text, 150);
+            if (msg.url) return msg.url;
+            return "";
+        }
+
+        function createMsgEl(msg) {
+            var displayText = getDisplayText(msg);
+            // Skip completely empty messages (no text, no URL, no caption —
+            // likely reactions). A captioned media-only message still shows.
+            if (!displayText && !msg.attachment_caption) return null;
+            if (!displayText) displayText = "(media)";
+
+            var isUrlOnly = !((msg.message || "").trim()) && msg.url;
+            var textClass = isUrlOnly ? "msg-text msg-url-only" : "msg-text";
+            var textContent = isUrlOnly
+                ? '<a href="' + escapeHtml(safeUrl(msg.url)) + '" target="_blank" rel="noreferrer noopener" class="msg-link">' + escapeHtml(displayText) + '</a>'
+                : escapeHtml(displayText);
+
+            var thumbHtml = '';
+            if (msg.has_screenshot) {
+                thumbHtml = '<img class="msg-thumb" src="/attachments/download/screenshot/' + msg.id + '" onclick="event.stopPropagation();showOverlay(this.src)">';
+            }
+
+            var captionHtml = '';
+            if (msg.attachment_caption) {
+                captionHtml = '<div class="ai-caption">\u{1F5BC} ' + escapeHtml(msg.attachment_caption) + '</div>';
+            }
+
+            var el = document.createElement("div");
+            el.className = "msg msg-new";
+            el.setAttribute("data-id", msg.id);
+            el.innerHTML =
+                '<div class="msg-left">' +
+                    '<div class="msg-meta">' +
+                        platformBadge(msg.platform) +
+                        '<span class="msg-group">' + escapeHtml(msg.group_name) + '</span>' +
+                        '<span class="msg-sender">' + escapeHtml(msg.sender_name) + '</span>' +
+                    '</div>' +
+                    '<div class="' + textClass + '">' + textContent + '</div>' +
+                    thumbHtml + captionHtml +
+                '</div>' +
+                '<div class="msg-time">' + relativeTime(msg.timestamp) + '</div>';
+            return el;
+        }
+
+        function showOverlay(src) {
+            var overlay = document.getElementById("overlay");
+            var img = document.getElementById("overlayImg");
+            img.src = src;
+            overlay.style.display = "flex";
+        }
+
+        function closeOverlay() {
+            document.getElementById("overlay").style.display = "none";
+        }
+
+        function setStatus(state) {
+            statusDot.className = "status-dot " + state;
+            if (state === "live") {
+                statusText.textContent = "Live";
+            } else if (state === "error") {
+                statusText.textContent = "Offline";
+            } else {
+                statusText.textContent = "Connecting";
+            }
+        }
+
+        function loadMessages() {
+            var url = "/api/recent_messages?limit=30";
+            if (latestId > 0) url += "&since_id=" + latestId;
+
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", url, true);
+            xhr.timeout = 10000;
+            xhr.onload = function() {
+                if (xhr.status !== 200) {
+                    setStatus("error");
+                    return;
+                }
+                setStatus("live");
+                var data;
+                try { data = JSON.parse(xhr.responseText); } catch(e) { return; }
+                var messages = data.messages || [];
+                if (data.latest_id) latestId = data.latest_id;
+
+                if (messages.length === 0 && feedEl.querySelectorAll(".msg").length === 0) {
+                    emptyMsg.textContent = "No messages yet";
+                    return;
+                }
+
+                if (emptyMsg.parentNode) emptyMsg.parentNode.removeChild(emptyMsg);
+
+                var isNearTop = feedEl.scrollTop < 100;
+
+                messages.reverse();
+                for (var i = 0; i < messages.length; i++) {
+                    var msgEl = createMsgEl(messages[i]);
+                    if (!msgEl) continue;
+                    if (feedEl.firstChild) {
+                        feedEl.insertBefore(msgEl, feedEl.firstChild);
+                    } else {
+                        feedEl.appendChild(msgEl);
+                    }
+                }
+
+                // Cap at 50 messages
+                var all = feedEl.querySelectorAll(".msg");
+                while (all.length > 50) {
+                    feedEl.removeChild(all[all.length - 1]);
+                    all = feedEl.querySelectorAll(".msg");
+                }
+
+                // Auto-scroll to top if user was near top
+                if (isNearTop) feedEl.scrollTop = 0;
+
+                // Remove highlight after 3s
+                setTimeout(function() {
+                    var newMsgs = feedEl.querySelectorAll(".msg-new");
+                    for (var j = 0; j < newMsgs.length; j++) {
+                        newMsgs[j].className = "msg";
+                    }
+                }, 3000);
+            };
+            xhr.onerror = function() { setStatus("error"); };
+            xhr.ontimeout = function() { setStatus("error"); };
+            xhr.send();
+        }
+
+        // Update relative times every 30s
+        function updateTimes() {
+            var msgs = feedEl.querySelectorAll(".msg");
+            for (var i = 0; i < msgs.length; i++) {
+                var timeEl = msgs[i].querySelector(".msg-time");
+                var id = msgs[i].getAttribute("data-id");
+                if (timeEl && timeEl.getAttribute("data-ts")) {
+                    timeEl.textContent = relativeTime(timeEl.getAttribute("data-ts"));
+                }
+            }
+        }
+
+        loadMessages();
+        setInterval(loadMessages, 5000);
+        setInterval(updateTimes, 30000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Snapshot: {{ snapshot.url|domain }} - Signal Dashboard{% endblock %}
+
+{% block head_extra %}
+<style>
+    /* Override base layout: lock outer page, let only the iframe scroll */
+    html, body { height: 100%; overflow: hidden; }
+    .container {
+        height: calc(100vh - 52px); /* viewport minus nav height */
+        display: flex;
+        flex-direction: column;
+        padding-bottom: 0;
+        max-width: none;
+    }
+    footer { display: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="flex-shrink:0; padding:8px 20px;">
+    <a href="/pages?url={{ snapshot.url|urlencode }}">&laquo; Back to snapshots</a>
+    <span style="margin:0 12px; color:#333;">|</span>
+    <a href="{{ snapshot.url }}" target="_blank" rel="noreferrer">Open live page</a>
+    <span style="margin:0 12px; color:#333;">|</span>
+    <a href="/api/page_html/{{ snapshot.id }}" target="_blank" rel="noreferrer">View source</a>
+    <span style="float:right; color:#999; font-size:0.85em;">
+        {{ snapshot.captured_at|datefmt('%Y-%m-%d %H:%M:%S') }} &middot; {{ snapshot.group_name or 'Unknown' }}
+    </span>
+</div>
+
+<iframe src="/api/page_render/{{ snapshot.id }}"
+        style="flex:1; width:100%; border:none; border-top:1px solid #333;"
+        sandbox=""
+        referrerpolicy="no-referrer"></iframe>
+{% endblock %}

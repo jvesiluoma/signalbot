@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Attachments - Signal Dashboard{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom:20px;">Attachments<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Attachments.</strong> Paginated browser for media captured from Signal. Two tabs: <em>Screenshots</em> (auto-captured web page screenshots from shared URLs) and <em>File Attachments</em> (files actually sent in Signal messages).</span></span></h1>
+
+<!-- Tab switcher -->
+<div style="text-align:center; margin-bottom:24px;">
+    <a href="/attachments?tab=screenshots" class="btn" style="{{ 'background:#333;' if tab != 'screenshots' else '' }}">Screenshots</a>
+    <a href="/attachments?tab=files" class="btn" style="{{ 'background:#333;' if tab != 'files' else '' }}margin-left:8px;">File Attachments</a>
+</div>
+
+{% if tab == 'files' %}
+<form method="get" action="/attachments" style="text-align:center; margin-bottom:16px;">
+    <input type="hidden" name="tab" value="files">
+    <input type="text" name="q" value="{{ q or '' }}" placeholder="Search filename or caption…"
+           style="padding:6px 10px; width:min(60%,420px); border:1px solid #444; border-radius:4px; background:#1b1b1b; color:#eee;">
+    <button type="submit" class="btn" style="font-size:0.85em; padding:5px 14px; margin-left:6px;">Search</button>
+    {% if q %}<a href="/attachments?tab=files" class="btn" style="font-size:0.85em; padding:5px 14px; margin-left:6px; background:#333;">Clear</a>{% endif %}
+</form>
+{% endif %}
+
+<p style="text-align:center; color:#999; margin-bottom:20px;">
+    {{ total_count }} {{ 'result' if q else 'item' }}{{ 's' if total_count != 1 else '' }}{% if q %} for &ldquo;{{ q }}&rdquo;{% endif %} &middot; Page {{ page }} of {{ total_pages }}
+</p>
+
+{% if tab == 'files' %}
+    {# ── File attachments from Signal ── #}
+    {% for item in items %}
+    <div class="card" style="margin-bottom:16px;">
+        <div class="entry-details" style="margin-bottom:8px;">
+            <span><strong>Name:</strong> {{ item.file_name }}</span>
+            <span><strong>Size:</strong> {{ (item.file_size / 1024)|round(1) }} KB</span>
+            {% if item.sent_timestamp %}<span><strong>Time:</strong> {{ item.sent_timestamp|datefmt }}</span>{% endif %}
+            {% if item.sender_name %}<span><strong>Sender:</strong> {{ item.sender_name }}</span>{% endif %}
+            {% if item.group_name %}<span><strong>Group:</strong> {{ item.group_name }}</span>{% endif %}
+            <span>
+                <a href="/attachments/download/file/{{ item.id }}" class="btn" style="font-size:0.8em; padding:4px 12px;">Download</a>
+            </span>
+        </div>
+
+        {% if item.media_type == 'image' %}
+            <img src="/attachments/preview/{{ item.id }}" alt="{{ item.file_name }}"
+                 style="max-width:100%; max-height:300px; display:block; margin:8px auto; border-radius:5px; cursor:pointer;"
+                 onclick="showOverlay(this.src)">
+
+        {% elif item.media_type == 'video' %}
+            <video controls preload="metadata"
+                   style="max-width:100%; max-height:400px; display:block; margin:8px auto; border-radius:5px;">
+                <source src="/attachments/preview/{{ item.id }}">
+                Your browser does not support video playback.
+            </video>
+
+        {% elif item.media_type == 'pdf' %}
+            <iframe src="/attachments/preview/{{ item.id }}"
+                    style="width:100%; height:500px; border:1px solid #333; border-radius:5px; margin:8px 0;">
+            </iframe>
+
+        {% else %}
+            <p style="color:#999; margin:8px 0;">
+                Binary file &middot; <a href="/attachments/download/file/{{ item.id }}" rel="noreferrer">Download {{ item.file_name }}</a>
+            </p>
+        {% endif %}
+
+        {% set _cap = (item.ai_caption or '')|trim %}
+        {% set _bad = _cap.startswith('[unavailable') %}
+        {% if _cap and not _bad %}
+            <p class="ai-caption">🖼 {{ _cap }}</p>
+        {% elif item.caption_status == 'error' or _bad %}
+            <p class="ai-caption" style="opacity:.6; font-style:italic;">⚠ image analysis unavailable</p>
+        {% elif item.media_type in ('image', 'video')
+                and (item.caption_status in ('queued', 'running', 'pending')
+                     or (item.caption_status is none and item.message_id)) %}
+            <p class="ai-caption" style="opacity:.6; font-style:italic;">⏳ image analysis pending</p>
+        {% endif %}
+    </div>
+    {% else %}
+    <p class="empty">No file attachments found.</p>
+    {% endfor %}
+
+{% else %}
+    {# ── Screenshots from messages ── #}
+    {% for item in items %}
+    <div class="card attachment" style="margin-bottom:16px;">
+        <div class="entry-details" style="margin-bottom:8px;">
+            <span><strong>Time:</strong> {{ item.timestamp|datefmt }}</span>
+            <span><strong>Group:</strong> {{ item.group_name }}</span>
+            <span><strong>ID:</strong> {{ item.id }}</span>
+            <span>
+                <a href="/attachments/download/screenshot/{{ item.id }}" class="btn" style="font-size:0.8em; padding:4px 12px;">Download</a>
+            </span>
+        </div>
+        {% if item.screenshot_b64 %}
+            <img src="data:image/png;base64,{{ item.screenshot_b64 }}" alt="Screenshot {{ item.id }}"
+                 onclick="showOverlay(this.src)">
+        {% else %}
+            <p class="empty">No data available.</p>
+        {% endif %}
+        {% if item.ai_analysis %}
+            <p class="ai-caption">🔍 {{ item.ai_analysis }}</p>
+        {% endif %}
+    </div>
+    {% else %}
+    <p class="empty">No screenshots found.</p>
+    {% endfor %}
+{% endif %}
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+{% set window_start = (page - 2) if (page - 2) > 1 else 1 %}
+{% set window_end = (page + 2) if (page + 2) < total_pages else total_pages %}
+{% set qs = ('&q=' ~ (q|urlencode)) if q else '' %}
+<div class="pagination">
+    {% if page > 1 %}
+        <a href="/attachments?tab={{ tab }}&page=1{{ qs }}" title="First">&laquo;</a>
+        <a href="/attachments?tab={{ tab }}&page={{ page - 1 }}{{ qs }}" title="Previous">&lsaquo; Prev</a>
+    {% endif %}
+    {% if window_start > 1 %}
+        <a href="/attachments?tab={{ tab }}&page=1{{ qs }}">1</a>
+        {% if window_start > 2 %}<span class="ellipsis">…</span>{% endif %}
+    {% endif %}
+    {% for p in range(window_start, window_end + 1) %}
+        {% if p == page %}
+            <span class="current">{{ p }}</span>
+        {% else %}
+            <a href="/attachments?tab={{ tab }}&page={{ p }}{{ qs }}">{{ p }}</a>
+        {% endif %}
+    {% endfor %}
+    {% if window_end < total_pages %}
+        {% if window_end < total_pages - 1 %}<span class="ellipsis">…</span>{% endif %}
+        <a href="/attachments?tab={{ tab }}&page={{ total_pages }}{{ qs }}">{{ total_pages }}</a>
+    {% endif %}
+    {% if page < total_pages %}
+        <a href="/attachments?tab={{ tab }}&page={{ page + 1 }}{{ qs }}" title="Next">Next &rsaquo;</a>
+        <a href="/attachments?tab={{ tab }}&page={{ total_pages }}{{ qs }}" title="Last">&raquo;</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{# Image lightbox (#overlay markup + showOverlay/hideOverlay) is provided
+   globally by base.html — the onclick="showOverlay(...)" calls above use it. #}
+{% endblock %}

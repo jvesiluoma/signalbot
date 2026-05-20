@@ -1,0 +1,18 @@
+flask
+requests
+mysql-connector-python
+playwright
+playwright-stealth
+beautifulsoup4
+# v1.x: API changed from `YouTubeTranscriptApi.list_transcripts(...)` (classmethod)
+# to `YouTubeTranscriptApi().list(...)` (instance). See poller.get_available_transcript().
+youtube-transcript-api>=1.0,<2.0
+# PDF text extraction for Playwright's "Page.goto: Download is starting" bypass.
+# Used by poller._extract_pdf_text(); falls back to PyPDF2 if pypdf is absent.
+pypdf>=4.0
+markdown
+bleach
+python-dotenv
+# Image decode/downscale for AI captioning (image_caption.py). Video frame
+# extraction additionally needs the `ffmpeg` binary (installed in the Dockerfile).
+Pillow

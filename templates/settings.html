@@ -1,0 +1,528 @@
+{% extends "base.html" %}
+{% block title %}Settings - Signal Bot{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom:8px;">Settings<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Settings.</strong> Configure the Signal / Telegram / WhatsApp integrations, pick which groups & chats to monitor, and toggle general behaviour. Values written here live in the <code>app_settings</code> database table and override the matching <code>.env</code> defaults. Most apply immediately; a few (connector enable flags &amp; the Telegram bot token) need a restart — the UI flags those.</span></span></h1>
+<p style="text-align:center; color:#8a7ab3; margin-bottom:24px; font-size:0.9em;">DB-backed config overlay &middot; this page is the future home of most configuration</p>
+
+<div class="intel-tabs" id="settingsTabs">
+    <a href="#" class="btn" data-tab="general">General</a>
+    <a href="#" class="btn" data-tab="signal">Signal</a>
+    <a href="#" class="btn" data-tab="telegram">Telegram</a>
+    <a href="#" class="btn" data-tab="whatsapp">WhatsApp</a>
+    <a href="#" class="btn" data-tab="aimodels">AI Models</a>
+</div>
+
+<div id="settingsToast" style="display:none; position:fixed; bottom:20px; right:20px; z-index:50; padding:12px 18px; border-radius:10px; background:#0d0520; border:1px solid var(--cyan, #00f0ff); color:#f4ecff; box-shadow:0 0 24px -6px rgba(0,240,255,0.6); max-width:360px; font-size:0.9em;"></div>
+
+{# ─────────────────────────────── GENERAL ─────────────────────────────── #}
+<section class="settings-pane" data-pane="general">
+    <div class="card">
+        <h2>Message capture<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Controls what the poller writes to the database. "Save my own messages" stores messages your bot account sends (mirrored from a linked device) as if they were any other group member's — recommended ON so the operator's own contributions show in dashboards & analytics.</span></span></h2>
+        <label style="display:flex; align-items:center; gap:12px; cursor:pointer; padding:8px 0;">
+            <input type="checkbox" id="optSaveOwn" style="width:18px; height:18px;">
+            <span>
+                <strong>Save my own messages to the database</strong><br>
+                <span style="color:#8a7ab3; font-size:0.85em;">Stores outgoing messages from the bot's Signal account (requires the bot to run as a <em>linked device</em> so signal-cli receives the sync). On by default.</span>
+            </span>
+        </label>
+        <div style="display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; margin-top:14px;">
+            <label style="display:flex; flex-direction:column; font-size:0.8em; color:#8a7ab3;">
+                Poll interval (seconds)
+                <input type="number" id="optPollInterval" min="2" max="600" step="1" style="width:120px; margin-top:4px;">
+            </label>
+            <button class="btn" id="btnSaveGeneral">Save general settings</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Authentication</h2>
+        <p style="color:#8a7ab3; font-size:0.9em; margin:0;">
+            Web login is <strong id="authState">—</strong>. Set <code>AUTH_SECRET</code> in <code>.env</code> to require a key (changing it needs a restart; it is not editable here for safety).
+        </p>
+    </div>
+</section>
+
+{# ─────────────────────────────── SIGNAL ─────────────────────────────── #}
+<section class="settings-pane" data-pane="signal" style="display:none;">
+    <div class="card">
+        <h2>Signal link status<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Talks to the signal-cli-rest-api daemon at <code>SIGNAL_API_BASE</code>. "Linked" means the daemon holds a registered Signal session for your number. If not linked, scan the QR code below from your phone (Signal → Settings → Linked devices → Link new device).</span></span></h2>
+        <div id="signalStatus" style="font-size:0.95em;">Checking…</div>
+        <button class="btn btn-sm" id="btnSignalRefresh" style="margin-top:10px;">Refresh status</button>
+    </div>
+
+    <div class="card">
+        <h2>Link a device (QR)<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Generates a linking QR from signal-cli-rest-api. Open Signal on your phone → Settings → Linked devices → "Link new device" → scan. The daemon becomes a linked device of your account and starts receiving messages (and your own sent-message syncs). The QR is single-use and expires quickly — click "Get fresh QR" again if it times out.</span></span></h2>
+        <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px;">
+            <label style="display:flex; flex-direction:column; font-size:0.8em; color:#8a7ab3;">
+                Device name
+                <input type="text" id="signalDeviceName" value="signalbot" style="width:200px; margin-top:4px;">
+            </label>
+            <button class="btn" id="btnSignalQr">Get fresh QR</button>
+        </div>
+        <div id="signalQrBox" style="display:none; text-align:center; padding:14px; background:#fff; border-radius:12px; max-width:300px;">
+            <img id="signalQrImg" alt="Signal linking QR" style="width:100%; height:auto;">
+        </div>
+        <p id="signalQrHint" style="color:#8a7ab3; font-size:0.85em; margin-top:8px;"></p>
+    </div>
+
+    <div class="card">
+        <h2>Monitored groups<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Lists every Signal group the linked account is in (from <code>GET /v1/groups/&lt;number&gt;</code>). Tick the groups you want archived & analysed; untick the rest. Saved here as the <code>signal_target_group_ids</code> setting, which overrides <code>TARGET_GROUP_IDS</code> in <code>.env</code> and is picked up by the poller within a few seconds — no restart needed. Leaving every box unticked means nothing is monitored.</span></span></h2>
+        <button class="btn btn-sm" id="btnSignalGroupsLoad">Fetch groups</button>
+        <span id="signalGroupsMeta" style="color:#8a7ab3; font-size:0.85em; margin-left:10px;"></span>
+        <div id="signalGroupsList" style="margin-top:12px;"></div>
+        <button class="btn" id="btnSignalGroupsSave" style="display:none; margin-top:12px;">Save selected groups</button>
+    </div>
+</section>
+
+{# ─────────────────────────────── TELEGRAM ─────────────────────────────── #}
+<section class="settings-pane" data-pane="telegram" style="display:none;">
+    <div class="card">
+        <h2>Telegram connector status<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Telegram is read via the Bot API — no QR code. Create a bot with @BotFather, copy its token, paste it below, and (in BotFather) disable privacy mode so the bot sees all group messages. The token is stored as <code>telegram_bot_token</code>; the <code>tg-connector</code> sidecar reads it at start, so changing the token or the enable flag needs a restart of the stack.</span></span></h2>
+        <div id="telegramStatus" style="font-size:0.95em;">Checking…</div>
+        <button class="btn btn-sm" id="btnTelegramRefresh" style="margin-top:10px;">Refresh status</button>
+    </div>
+
+    <div class="card">
+        <h2>Bot configuration</h2>
+        <label style="display:flex; align-items:center; gap:12px; cursor:pointer; padding:8px 0;">
+            <input type="checkbox" id="tgEnabled" style="width:18px; height:18px;">
+            <span><strong>Enable the Telegram connector</strong> <span style="color:#ffb800; font-size:0.85em;">(restart required)</span></span>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:0.8em; color:#8a7ab3; margin-top:8px;">
+            Bot token (from @BotFather) <span style="color:#ffb800;">— leave blank to keep the current one; restart required to apply</span>
+            <input type="password" id="tgBotToken" placeholder="123456:ABC-DEF…" autocomplete="off" style="width:100%; max-width:480px; margin-top:4px;">
+        </label>
+        <button class="btn" id="btnTelegramSave" style="margin-top:12px;">Save Telegram config</button>
+    </div>
+
+    <div class="card">
+        <h2>Monitored chats<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Lists chats the bot can see (from the connector's <code>GET /v1/chats</code> — available once the connector is running). Tick the ones to ingest. Saved as <code>telegram_target_chat_ids</code>; an empty selection in <code>.env</code> means "all chats the bot is in", but once you save here only the ticked chats are kept.</span></span></h2>
+        <button class="btn btn-sm" id="btnTelegramChatsLoad">Fetch chats</button>
+        <span id="telegramChatsMeta" style="color:#8a7ab3; font-size:0.85em; margin-left:10px;"></span>
+        <div id="telegramChatsList" style="margin-top:12px;"></div>
+        <button class="btn" id="btnTelegramChatsSave" style="display:none; margin-top:12px;">Save selected chats</button>
+    </div>
+</section>
+
+{# ─────────────────────────────── WHATSAPP ─────────────────────────────── #}
+<section class="settings-pane" data-pane="whatsapp" style="display:none;">
+    <div class="card">
+        <h2>WhatsApp connector status<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">WhatsApp runs through the <code>wa-connector</code> sidecar (Baileys). It pairs as a linked device of a real WhatsApp account by scanning a QR (WhatsApp → Settings → Linked devices → Link a device). The session lives in the connector's volume, so you only pair once. Enabling/disabling the connector needs a restart.</span></span></h2>
+        <div id="whatsappStatus" style="font-size:0.95em;">Checking…</div>
+        <button class="btn btn-sm" id="btnWhatsappRefresh" style="margin-top:10px;">Refresh status</button>
+    </div>
+
+    <div class="card">
+        <h2>Pair a device (QR)<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Fetches the current pairing QR from the connector. Scan it from WhatsApp → Linked devices. If the connector reports it's already linked, no QR is shown. The QR rotates — re-fetch if it doesn't take.</span></span></h2>
+        <button class="btn" id="btnWhatsappQr">Get pairing QR</button>
+        <button class="btn btn-sm" id="btnWhatsappReset" style="margin-left:8px; background:#7a2a3a;">Reset pairing</button>
+        <span class="help" tabindex="0" role="button" aria-label="Help" style="margin-left:6px;">?<span class="help-body">Wipes the connector's stored WhatsApp session and forces a brand-new QR. Use this when you unlinked the device from your phone but the connector still won't show a QR. Existing message history in MySQL is not affected — only the linked-device pairing keys.</span></span>
+        <div id="whatsappQrBox" style="display:none; text-align:center; padding:14px; background:#fff; border-radius:12px; max-width:320px; margin-top:12px;">
+            <img id="whatsappQrImg" alt="WhatsApp pairing QR" style="width:100%; height:auto;">
+            <pre id="whatsappQrText" style="display:none; white-space:pre; font-size:9px; line-height:9px; color:#000; text-align:left; overflow:auto;"></pre>
+        </div>
+        <p id="whatsappQrHint" style="color:#8a7ab3; font-size:0.85em; margin-top:8px;"></p>
+    </div>
+
+    <div class="card">
+        <h2>Enable / monitored chats</h2>
+        <label style="display:flex; align-items:center; gap:12px; cursor:pointer; padding:8px 0;">
+            <input type="checkbox" id="waEnabled" style="width:18px; height:18px;">
+            <span><strong>Enable the WhatsApp connector</strong> <span style="color:#ffb800; font-size:0.85em;">(restart required)</span></span>
+        </label>
+        <button class="btn" id="btnWhatsappSave" style="margin-top:8px;">Save WhatsApp config</button>
+        <hr style="border:none; border-top:1px solid rgba(164,106,255,0.14); margin:16px 0;">
+        <button class="btn btn-sm" id="btnWhatsappChatsLoad">Fetch chats</button>
+        <span id="whatsappChatsMeta" style="color:#8a7ab3; font-size:0.85em; margin-left:10px;"></span>
+        <div id="whatsappChatsList" style="margin-top:12px;"></div>
+        <button class="btn" id="btnWhatsappChatsSave" style="display:none; margin-top:12px;">Save selected chats</button>
+    </div>
+</section>
+
+{# ─────────────────────────────── AI MODELS ─────────────────────────────── #}
+<section class="settings-pane" data-pane="aimodels" style="display:none;">
+    <div class="card">
+        <h2>AI master switch<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">When OFF, every LLM feature (per-URL analysis, group summaries, sentiment, image/video captions, intel briefs) is skipped cleanly — the app keeps archiving messages and serving dashboards; analysis fields stay empty and auto-fill once AI is turned back on with a working model. <code>.env</code> <code>OLLAMA_*</code> values are only defaults now; anything set here wins.</span></span></h2>
+        <label style="display:flex; align-items:center; gap:12px; cursor:pointer; padding:8px 0;">
+            <input type="checkbox" id="aiEnabled" style="width:18px; height:18px;">
+            <span><strong>AI features enabled</strong> <span style="color:#8a7ab3; font-size:0.85em;">— global kill-switch / graceful degradation (on by default)</span></span>
+        </label>
+        <div id="aiModelsMeta" style="color:#8a7ab3; font-size:0.85em; margin-top:8px;">Ollama: checking…</div>
+    </div>
+    <div id="aiRoleCards"></div>
+    <div class="card">
+        <button class="btn" id="btnSaveAiModels">Save AI model settings</button>
+        <span style="color:#8a7ab3; font-size:0.85em; margin-left:10px;">Applies within a few seconds — no restart.</span>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    'use strict';
+
+    // ── helpers ────────────────────────────────────────────────────────
+    function $(id) { return document.getElementById(id); }
+    // Escapes quotes too, so it is safe in attribute contexts.
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"'`]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c]; }); }
+
+    var toastTimer = null;
+    function toast(msg, ok) {
+        var el = $('settingsToast');
+        el.textContent = msg;
+        el.style.borderColor = ok === false ? '#ff4d6d' : (ok === true ? '#b6ff3c' : '#00f0ff');
+        el.style.boxShadow = '0 0 24px -6px ' + (ok === false ? 'rgba(255,77,109,0.6)' : ok === true ? 'rgba(182,255,60,0.6)' : 'rgba(0,240,255,0.6)');
+        el.style.display = 'block';
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { el.style.display = 'none'; }, 6000);
+    }
+
+    function jget(url) { return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); }); }
+    function jpost(url, data) {
+        return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data || {}) })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); });
+    }
+
+    function badge(text, color) {
+        return '<span style="display:inline-block; padding:2px 8px; border-radius:999px; font-size:0.78em; font-weight:600; letter-spacing:0.04em; background:' + color + '22; color:' + color + '; border:1px solid ' + color + '55;">' + esc(text) + '</span>';
+    }
+
+    function renderChecklist(containerId, items, idKey, labelFn) {
+        var c = $(containerId);
+        if (!items || !items.length) { c.innerHTML = '<p class="empty">Nothing returned. The service may be unreachable or has no chats yet.</p>'; return; }
+        var html = '<div style="display:flex; flex-direction:column; gap:6px; max-height:420px; overflow:auto;">';
+        items.forEach(function (it) {
+            html += '<label style="display:flex; align-items:center; gap:10px; padding:6px 8px; border-radius:8px; background:rgba(164,106,255,0.05); cursor:pointer;">' +
+                '<input type="checkbox" data-id="' + esc(it[idKey]) + '" ' + (it.selected ? 'checked' : '') + ' style="width:16px; height:16px;">' +
+                '<span>' + labelFn(it) + '</span></label>';
+        });
+        html += '</div>';
+        c.innerHTML = html;
+    }
+    function checkedIds(containerId) {
+        return Array.prototype.slice.call($(containerId).querySelectorAll('input[type=checkbox]:checked')).map(function (cb) { return cb.getAttribute('data-id'); });
+    }
+
+    // ── tabs ───────────────────────────────────────────────────────────
+    var panes = Array.prototype.slice.call(document.querySelectorAll('.settings-pane'));
+    var tabLinks = Array.prototype.slice.call(document.querySelectorAll('#settingsTabs a'));
+    function showTab(name) {
+        panes.forEach(function (p) { p.style.display = (p.getAttribute('data-pane') === name) ? '' : 'none'; });
+        tabLinks.forEach(function (a) { a.style.background = (a.getAttribute('data-tab') === name) ? '' : '#333'; });
+        if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+        // lazy-load each tab's status on first view
+        if (name === 'signal' && !showTab._signal) { showTab._signal = true; loadSignalStatus(); }
+        if (name === 'telegram' && !showTab._tg) { showTab._tg = true; loadTelegramStatus(); }
+        if (name === 'whatsapp' && !showTab._wa) { showTab._wa = true; loadWhatsappStatus(); }
+        if (name === 'aimodels' && !showTab._ai) { showTab._ai = true; loadAiModels(); }
+    }
+    tabLinks.forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); showTab(a.getAttribute('data-tab')); }); });
+
+    // ── general ────────────────────────────────────────────────────────
+    function loadSnapshot() {
+        return jget('/api/settings').then(function (res) {
+            var s = res.body || {};
+            $('optSaveOwn').checked = !!s.save_own_messages;
+            $('optPollInterval').value = s.poll_interval != null ? s.poll_interval : '';
+            $('authState').textContent = s.auth_enabled ? 'ENABLED (key required)' : 'DISABLED (open)';
+            if (s.telegram) { $('tgEnabled').checked = !!s.telegram.enabled; }
+            if (s.whatsapp) { $('waEnabled').checked = !!s.whatsapp.enabled; }
+            return s;
+        });
+    }
+    $('btnSaveGeneral').addEventListener('click', function () {
+        var payload = { save_own_messages: $('optSaveOwn').checked };
+        var pi = parseInt($('optPollInterval').value, 10);
+        if (!isNaN(pi) && pi >= 2) payload.poll_interval = pi;
+        jpost('/api/settings', payload).then(function (r) {
+            if (r.ok && r.body.ok) { toast('Saved: ' + (r.body.saved || []).join(', '), true); }
+            else { toast('Save failed: ' + ((r.body && r.body.error) || r.status), false); }
+        });
+    });
+
+    // ── signal ─────────────────────────────────────────────────────────
+    function loadSignalStatus() {
+        $('signalStatus').textContent = 'Checking…';
+        jget('/api/settings/signal/status').then(function (r) {
+            var s = r.body || {};
+            var html = '';
+            html += '<div>API: <code>' + esc(s.api_base) + '</code></div>';
+            html += '<div>Daemon: ' + (s.reachable ? badge('reachable', '#b6ff3c') : badge('UNREACHABLE', '#ff4d6d')) + '</div>';
+            html += '<div>Number: <code>' + esc(s.phone_number || '(not set)') + '</code> &middot; ' + (s.registered ? badge('LINKED', '#b6ff3c') : badge('not linked', '#ffb800')) + '</div>';
+            if (s.accounts && s.accounts.length) html += '<div style="color:#8a7ab3; font-size:0.85em;">Known accounts: ' + s.accounts.map(esc).join(', ') + '</div>';
+            if (s.error) html += '<div style="color:#ff4d6d; font-size:0.85em;">' + esc(s.error) + '</div>';
+            $('signalStatus').innerHTML = html;
+        }).catch(function () { $('signalStatus').innerHTML = badge('error contacting app', '#ff4d6d'); });
+    }
+    $('btnSignalRefresh').addEventListener('click', loadSignalStatus);
+
+    $('btnSignalQr').addEventListener('click', function () {
+        var name = encodeURIComponent($('signalDeviceName').value || 'signalbot');
+        var url = '/api/settings/signal/qrlink?device_name=' + name + '&_=' + Date.now();
+        var img = $('signalQrImg');
+        $('signalQrHint').textContent = 'Loading QR… open Signal → Settings → Linked devices → Link new device.';
+        img.onload = function () { $('signalQrBox').style.display = ''; $('signalQrHint').textContent = 'Scan within ~1 min. If it times out, click "Get fresh QR" again. Then check status.'; };
+        img.onerror = function () { $('signalQrBox').style.display = 'none'; $('signalQrHint').textContent = 'Could not load QR — is signal-cli-rest-api reachable at the configured SIGNAL_API_BASE?'; };
+        img.src = url;
+    });
+
+    function loadSignalGroups() {
+        $('signalGroupsMeta').textContent = 'loading…';
+        jget('/api/settings/signal/groups').then(function (r) {
+            if (!r.ok) { $('signalGroupsList').innerHTML = '<p class="empty">' + esc((r.body && r.body.error) || ('HTTP ' + r.status)) + '</p>'; $('signalGroupsMeta').textContent = ''; return; }
+            var gs = r.body.groups || [];
+            renderChecklist('signalGroupsList', gs, 'id', function (g) {
+                return esc(g.name) + ' <span style="color:#8a7ab3; font-size:0.85em;">' + (g.members != null ? g.members + ' members' : '') + (g.blocked ? ' &middot; blocked' : '') + '</span>';
+            });
+            $('signalGroupsMeta').textContent = gs.length + ' groups · ' + (r.body.selected_count || 0) + ' currently monitored';
+            $('btnSignalGroupsSave').style.display = gs.length ? '' : 'none';
+        }).catch(function () { $('signalGroupsList').innerHTML = '<p class="empty">request failed</p>'; $('signalGroupsMeta').textContent = ''; });
+    }
+    $('btnSignalGroupsLoad').addEventListener('click', loadSignalGroups);
+    $('btnSignalGroupsSave').addEventListener('click', function () {
+        jpost('/api/settings/signal/groups', { group_ids: checkedIds('signalGroupsList') }).then(function (r) {
+            if (r.ok && r.body.ok) { toast('Monitored Signal groups updated (' + (r.body.target_group_ids || []).length + ' selected). Live within a few seconds.', true); }
+            else { toast('Save failed: ' + ((r.body && r.body.error) || r.status), false); }
+        });
+    });
+
+    // ── telegram ───────────────────────────────────────────────────────
+    function loadTelegramStatus() {
+        $('telegramStatus').textContent = 'Checking…';
+        jget('/api/settings/telegram/status').then(function (r) {
+            var s = r.body || {};
+            var html = '';
+            html += '<div>Connector: <code>' + esc(s.connector_base) + '</code> &middot; ' + (s.reachable ? badge('reachable', '#b6ff3c') : badge('UNREACHABLE', '#ffb800')) + '</div>';
+            html += '<div>Connector enabled: ' + (s.enabled ? badge('yes', '#b6ff3c') : badge('no', '#8a7ab3')) + ' &middot; Bot token: ' + (s.bot_token_set ? badge('set', '#b6ff3c') : badge('not set', '#ff4d6d')) + '</div>';
+            html += '<div style="color:#8a7ab3; font-size:0.85em;">Bot API: <code>' + esc(s.bot_api_base) + '</code></div>';
+            if (s.info) html += '<div style="color:#8a7ab3; font-size:0.85em;">' + esc(typeof s.info === 'string' ? s.info : JSON.stringify(s.info)) + '</div>';
+            $('telegramStatus').innerHTML = html;
+        }).catch(function () { $('telegramStatus').innerHTML = badge('error contacting app', '#ff4d6d'); });
+    }
+    $('btnTelegramRefresh').addEventListener('click', loadTelegramStatus);
+    $('btnTelegramSave').addEventListener('click', function () {
+        var payload = { telegram_enabled: $('tgEnabled').checked };
+        var tok = $('tgBotToken').value.trim();
+        if (tok) payload.telegram_bot_token = tok;
+        jpost('/api/settings', payload).then(function (r) {
+            if (r.ok && r.body.ok) {
+                $('tgBotToken').value = '';
+                var rr = (r.body.restart_required || []);
+                toast('Saved.' + (rr.length ? ' Restart the stack to apply: ' + rr.join(', ') : ''), true);
+                loadTelegramStatus();
+            } else { toast('Save failed: ' + ((r.body && r.body.error) || r.status), false); }
+        });
+    });
+    function loadTelegramChats() {
+        $('telegramChatsMeta').textContent = 'loading…';
+        jget('/api/settings/telegram/chats').then(function (r) {
+            if (!r.ok) { $('telegramChatsList').innerHTML = '<p class="empty">' + esc((r.body && r.body.error) || ('HTTP ' + r.status)) + '</p>'; $('telegramChatsMeta').textContent = ''; return; }
+            var cs = r.body.chats || [];
+            renderChecklist('telegramChatsList', cs, 'id', function (c) {
+                return esc(c.title) + ' <span style="color:#8a7ab3; font-size:0.85em;">' + esc(c.kind || '') + (c.members ? ' &middot; ' + c.members + ' members' : '') + ' &middot; ' + esc(c.id) + '</span>';
+            });
+            $('telegramChatsMeta').textContent = cs.length + ' chats · ' + (r.body.selected_count || 0) + ' selected';
+            $('btnTelegramChatsSave').style.display = cs.length ? '' : 'none';
+        }).catch(function () { $('telegramChatsList').innerHTML = '<p class="empty">request failed</p>'; $('telegramChatsMeta').textContent = ''; });
+    }
+    $('btnTelegramChatsLoad').addEventListener('click', loadTelegramChats);
+    $('btnTelegramChatsSave').addEventListener('click', function () {
+        jpost('/api/settings/telegram/chats', { chat_ids: checkedIds('telegramChatsList') }).then(function (r) {
+            if (r.ok && r.body.ok) { toast('Telegram chats updated (' + (r.body.target_chat_ids || []).length + ' selected).', true); }
+            else { toast('Save failed: ' + ((r.body && r.body.error) || r.status), false); }
+        });
+    });
+
+    // ── whatsapp ───────────────────────────────────────────────────────
+    function loadWhatsappStatus() {
+        $('whatsappStatus').textContent = 'Checking…';
+        jget('/api/settings/whatsapp/status').then(function (r) {
+            var s = r.body || {};
+            var html = '';
+            html += '<div>Connector: <code>' + esc(s.connector_base) + '</code> &middot; ' + (s.reachable ? badge('reachable', '#b6ff3c') : badge('UNREACHABLE', '#ffb800')) + '</div>';
+            html += '<div>Connector enabled: ' + (s.enabled ? badge('yes', '#b6ff3c') : badge('no', '#8a7ab3')) + ' &middot; Linked: ' + (s.linked === true ? badge('yes', '#b6ff3c') : s.linked === false ? badge('no — pair below', '#ffb800') : badge('unknown', '#8a7ab3')) + '</div>';
+            if (s.info) html += '<div style="color:#8a7ab3; font-size:0.85em;">' + esc(typeof s.info === 'string' ? s.info : JSON.stringify(s.info)) + '</div>';
+            $('whatsappStatus').innerHTML = html;
+        }).catch(function () { $('whatsappStatus').innerHTML = badge('error contacting app', '#ff4d6d'); });
+    }
+    $('btnWhatsappRefresh').addEventListener('click', loadWhatsappStatus);
+    $('btnWhatsappSave').addEventListener('click', function () {
+        jpost('/api/settings', { whatsapp_enabled: $('waEnabled').checked }).then(function (r) {
+            if (r.ok && r.body.ok) { toast('Saved. Restart the stack to (de)activate the WhatsApp connector.', true); }
+            else { toast('Save failed: ' + ((r.body && r.body.error) || r.status), false); }
+        });
+    });
+    $('btnWhatsappReset').addEventListener('click', function () {
+        if (!confirm('Wipe the WhatsApp pairing and start fresh?\n\nThis logs the connector out of WhatsApp and clears its stored session keys, so you will need to scan a brand-new QR from WhatsApp → Linked devices.\n\nMessage history already in MySQL is NOT affected.')) return;
+        var btn = $('btnWhatsappReset');
+        btn.disabled = true; var orig = btn.textContent; btn.textContent = 'Resetting…';
+        $('whatsappQrHint').textContent = 'Wiping session, restarting connector…';
+        $('whatsappQrBox').style.display = 'none';
+        jpost('/api/settings/whatsapp/reset', {}).then(function (r) {
+            if (!r.ok || !(r.body && r.body.ok)) {
+                $('whatsappQrHint').textContent = 'Reset failed: ' + ((r.body && r.body.error) || ('HTTP ' + r.status));
+                return;
+            }
+            toast('Session wiped (' + (r.body.wiped || 0) + ' files). Fetching new QR…', true);
+            // Baileys needs a couple of seconds to spin up and emit a QR.
+            setTimeout(function () { $('btnWhatsappQr').click(); loadWhatsappStatus(); }, 2500);
+        }).catch(function (e) {
+            $('whatsappQrHint').textContent = 'Reset request failed: ' + e;
+        }).finally(function () {
+            btn.disabled = false; btn.textContent = orig;
+        });
+    });
+    $('btnWhatsappQr').addEventListener('click', function () {
+        $('whatsappQrHint').textContent = 'Requesting QR…';
+        // First try as JSON (connector may return {qr: "..."}); also handles image bodies.
+        fetch('/api/settings/whatsapp/qr?_=' + Date.now()).then(function (r) {
+            var ct = r.headers.get('Content-Type') || '';
+            if (ct.indexOf('image') === 0 || ct.indexOf('image/') === 0) {
+                return r.blob().then(function (b) {
+                    $('whatsappQrImg').style.display = ''; $('whatsappQrText').style.display = 'none';
+                    $('whatsappQrImg').src = URL.createObjectURL(b);
+                    $('whatsappQrBox').style.display = ''; $('whatsappQrHint').textContent = 'Scan from WhatsApp → Linked devices → Link a device.';
+                });
+            }
+            return r.json().then(function (j) {
+                if (j.error) { $('whatsappQrBox').style.display = 'none'; $('whatsappQrHint').textContent = j.error; return; }
+                var qr = j.qr || j.code || j.data;
+                if (typeof qr === 'string' && qr.indexOf('data:image') === 0) {
+                    $('whatsappQrImg').style.display = ''; $('whatsappQrText').style.display = 'none';
+                    $('whatsappQrImg').src = qr;
+                } else if (typeof qr === 'string') {
+                    $('whatsappQrImg').style.display = 'none'; $('whatsappQrText').style.display = '';
+                    $('whatsappQrText').textContent = qr;
+                } else {
+                    $('whatsappQrHint').textContent = 'Connector returned no usable QR (already linked?). Response: ' + JSON.stringify(j);
+                    return;
+                }
+                $('whatsappQrBox').style.display = ''; $('whatsappQrHint').textContent = 'Scan from WhatsApp → Linked devices → Link a device.';
+            });
+        }).catch(function (e) { $('whatsappQrBox').style.display = 'none'; $('whatsappQrHint').textContent = 'Request failed: ' + e; });
+    });
+    function loadWhatsappChats() {
+        $('whatsappChatsMeta').textContent = 'loading…';
+        jget('/api/settings/whatsapp/chats').then(function (r) {
+            if (!r.ok) { $('whatsappChatsList').innerHTML = '<p class="empty">' + esc((r.body && r.body.error) || ('HTTP ' + r.status)) + '</p>'; $('whatsappChatsMeta').textContent = ''; return; }
+            var cs = r.body.chats || [];
+            renderChecklist('whatsappChatsList', cs, 'id', function (c) {
+                return esc(c.title) + ' <span style="color:#8a7ab3; font-size:0.85em;">' + esc(c.kind || '') + (c.members ? ' &middot; ' + c.members + ' members' : '') + ' &middot; ' + esc(c.id) + '</span>';
+            });
+            $('whatsappChatsMeta').textContent = cs.length + ' chats · ' + (r.body.selected_count || 0) + ' selected';
+            $('btnWhatsappChatsSave').style.display = cs.length ? '' : 'none';
+        }).catch(function () { $('whatsappChatsList').innerHTML = '<p class="empty">request failed</p>'; $('whatsappChatsMeta').textContent = ''; });
+    }
+    $('btnWhatsappChatsLoad').addEventListener('click', loadWhatsappChats);
+    $('btnWhatsappChatsSave').addEventListener('click', function () {
+        jpost('/api/settings/whatsapp/chats', { chat_ids: checkedIds('whatsappChatsList') }).then(function (r) {
+            if (r.ok && r.body.ok) { toast('WhatsApp chats updated (' + (r.body.target_chat_ids || []).length + ' selected).', true); }
+            else { toast('Save failed: ' + ((r.body && r.body.error) || r.status), false); }
+        });
+    });
+
+    // ── ai models ──────────────────────────────────────────────────────
+    var AI_ROLES = [
+        { key: 'summary', label: 'Group summaries / intel brief', floor: 16384 },
+        { key: 'analysis', label: 'Per-URL analysis', floor: 2048 },
+        { key: 'sentiment', label: 'Message sentiment', floor: 1024 },
+        { key: 'vision', label: 'Image / video captions', floor: 2048 }
+    ];
+    var AI_NONTHINK = { summary: 16384, analysis: 256, sentiment: 10, vision: 2048 };
+    var AI_CTX_DEF = { summary: 8192, analysis: 4096, sentiment: 2048, vision: 8192 };
+
+    function aiModelOptions(models, current, envDefault) {
+        var opts = '<option value="__none__"' + (current === '__none__' ? ' selected' : '') + '>(none — feature disabled)</option>';
+        var seen = {};
+        (models || []).forEach(function (m) {
+            seen[m] = true;
+            opts += '<option value="' + esc(m) + '"' + (m === current ? ' selected' : '') + '>' + esc(m) + (m === envDefault ? '  (.env default)' : '') + '</option>';
+        });
+        if (current && current !== '__none__' && !seen[current]) {
+            opts += '<option value="' + esc(current) + '" selected>' + esc(current) + '  (configured, not in /api/tags)</option>';
+        }
+        opts += '<option value="__custom__">Other (type a name)…</option>';
+        return opts;
+    }
+
+    function renderAiRoleCard(role, ai, models) {
+        var r = (ai && ai[role.key]) || {};
+        var cur = r.model || '';
+        return '<div class="card" data-role="' + role.key + '">' +
+            '<h2>' + esc(role.label) + '<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Model for ' + esc(role.label.toLowerCase()) + '. Tick "Thinking model" for reasoning-template models (qwen3*, etc.) — it raises the minimum num_predict so hidden reasoning cannot starve the visible answer (the bug that wrote &quot;N/A&quot;). Pick (none) to disable just this feature. <code>.env</code> default: <code>' + esc(r.env_default_model || '—') + '</code>.</span></span></h2>' +
+            '<label style="display:flex; flex-direction:column; font-size:0.8em; color:#8a7ab3;">Model' +
+            '<select data-f="model" style="width:340px; margin-top:4px;">' + aiModelOptions(models, cur, r.env_default_model) + '</select></label>' +
+            '<input type="text" data-f="model_custom" placeholder="model:tag" style="display:none; width:340px; margin-top:6px;">' +
+            '<label style="display:flex; align-items:center; gap:10px; margin-top:10px; cursor:pointer;">' +
+            '<input type="checkbox" data-f="thinking" ' + (r.thinking ? 'checked' : '') + ' style="width:16px; height:16px;">' +
+            '<span>Thinking model <span style="color:#8a7ab3; font-size:0.85em;">(raises num_predict floor to ' + role.floor + ')</span></span></label>' +
+            '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:10px;">' +
+            '<label style="display:flex; flex-direction:column; font-size:0.8em; color:#8a7ab3;">num_ctx<input type="number" data-f="num_ctx" min="512" step="512" value="' + (r.num_ctx || AI_CTX_DEF[role.key]) + '" style="width:120px; margin-top:4px;"></label>' +
+            '<label style="display:flex; flex-direction:column; font-size:0.8em; color:#8a7ab3;">num_predict <span data-f="floorhint" style="color:#ffb800;"></span><input type="number" data-f="num_predict" min="1" step="1" value="' + (r.num_predict || AI_NONTHINK[role.key]) + '" style="width:120px; margin-top:4px;"></label>' +
+            '</div></div>';
+    }
+
+    function wireAiRoleCard(role) {
+        var card = document.querySelector('.card[data-role="' + role.key + '"]');
+        if (!card) return;
+        var sel = card.querySelector('[data-f=model]');
+        var custom = card.querySelector('[data-f=model_custom]');
+        var think = card.querySelector('[data-f=thinking]');
+        var np = card.querySelector('[data-f=num_predict]');
+        var hint = card.querySelector('[data-f=floorhint]');
+        sel.addEventListener('change', function () { custom.style.display = (sel.value === '__custom__') ? '' : 'none'; });
+        function applyThink() {
+            var sThink = role.floor, sFlat = AI_NONTHINK[role.key];
+            var curv = parseInt(np.value, 10);
+            if (isNaN(curv) || curv === sThink || curv === sFlat) {
+                np.value = think.checked ? sThink : sFlat;
+            }
+            hint.textContent = think.checked ? ('(min ' + role.floor + ' enforced)') : '';
+        }
+        think.addEventListener('change', applyThink);
+        applyThink();
+    }
+
+    function loadAiModels() {
+        $('aiModelsMeta').textContent = 'Ollama: checking…';
+        jget('/api/settings/ollama/models').then(function (r) {
+            var b = r.body || {}, ai = b.ai || {};
+            $('aiEnabled').checked = !!ai.enabled;
+            var host = $('aiRoleCards'); host.innerHTML = '';
+            AI_ROLES.forEach(function (role) { host.insertAdjacentHTML('beforeend', renderAiRoleCard(role, ai, b.models)); });
+            AI_ROLES.forEach(wireAiRoleCard);
+            $('aiModelsMeta').innerHTML = b.reachable
+                ? ((b.models || []).length + ' models found on Ollama')
+                : (badge('Ollama unreachable — free-text / configured values still work', '#ffb800') + ' ' + esc(b.error || ''));
+        }).catch(function () { $('aiModelsMeta').innerHTML = badge('error contacting app', '#ff4d6d'); });
+    }
+
+    $('btnSaveAiModels').addEventListener('click', function () {
+        var payload = { ai_enabled: $('aiEnabled').checked };
+        AI_ROLES.forEach(function (role) {
+            var card = document.querySelector('.card[data-role="' + role.key + '"]');
+            var sel = card.querySelector('[data-f=model]');
+            var model = sel.value;
+            if (model === '__custom__') model = (card.querySelector('[data-f=model_custom]').value || '').trim() || '__none__';
+            payload['ollama_' + role.key + '_model'] = model;
+            payload['ollama_' + role.key + '_thinking'] = card.querySelector('[data-f=thinking]').checked;
+            payload['ollama_' + role.key + '_num_ctx'] = parseInt(card.querySelector('[data-f=num_ctx]').value, 10) || AI_CTX_DEF[role.key];
+            payload['ollama_' + role.key + '_num_predict'] = parseInt(card.querySelector('[data-f=num_predict]').value, 10) || AI_NONTHINK[role.key];
+        });
+        jpost('/api/settings', payload).then(function (r) {
+            if (r.ok && r.body.ok) { toast('AI model settings saved — live within a few seconds.', true); loadAiModels(); }
+            else { toast('Save failed: ' + ((r.body && r.body.error) || r.status), false); }
+        });
+    });
+
+    // ── boot ───────────────────────────────────────────────────────────
+    loadSnapshot().then(function () {
+        var initial = (location.hash || '#general').replace('#', '');
+        if (['general', 'signal', 'telegram', 'whatsapp', 'aimodels'].indexOf(initial) === -1) initial = 'general';
+        showTab(initial);
+    });
+})();
+</script>
+{% endblock %}

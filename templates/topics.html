@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Cross-Group Topics - Signal Dashboard{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom:24px;">Cross-Group Topics<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Topics.</strong> LLM-generated summary of themes appearing across all monitored groups together, rather than per-group. Updated periodically by the background worker; rerun manually with the refresh button if shown.</span></span></h1>
+<p style="text-align:center; color:#999; margin-bottom:24px;">What are all groups talking about?</p>
+
+{% if status == 'done' and content %}
+<div class="card">
+    <div class="summary-content">{{ content|safe }}</div>
+    {% if completed_at %}
+    <p style="margin-top:16px; font-size:0.8em; color:#666;">Generated: {{ completed_at|datefmt }}</p>
+    {% endif %}
+</div>
+<div style="text-align:center; margin-top:16px;">
+    <button type="button" id="regenerateBtn" class="btn btn-outline btn-sm">Regenerate</button>
+    <div id="regenerateStatus" style="margin-top:8px; font-size:0.85em; color:#999;"></div>
+</div>
+{% elif status == 'generating' %}
+<div class="card" style="text-align:center;">
+    <p><em>Cross-group analysis is being generated...</em></p>
+    <p style="color:#666; font-size:0.9em;">This page will refresh automatically when ready.</p>
+</div>
+{% else %}
+<div class="card" style="text-align:center;">
+    <p class="empty">No cross-group analysis available yet. Group summaries are generated automatically in the background — check back shortly.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    var btn = document.getElementById('regenerateBtn');
+    var status = document.getElementById('regenerateStatus');
+    if (!btn) return;
+
+    function fmtSeconds(s) {
+        s = Math.max(0, parseInt(s, 10) || 0);
+        if (s < 60) return s + 's';
+        var m = Math.floor(s / 60);
+        var r = s % 60;
+        return m + 'm ' + (r < 10 ? '0' : '') + r + 's';
+    }
+
+    var cooldownTimer = null;
+    var cooldownSeconds = 1800;  // fallback; refreshed from /api/force_refresh_status
+
+    function startCooldown(seconds) {
+        if (cooldownTimer) clearInterval(cooldownTimer);
+        btn.disabled = true;
+        var remaining = Math.max(0, seconds | 0);
+        function tick() {
+            if (remaining <= 0) {
+                clearInterval(cooldownTimer);
+                cooldownTimer = null;
+                btn.disabled = false;
+                status.textContent = 'Ready to regenerate.';
+                return;
+            }
+            status.textContent = 'Cooldown active — available in ' + fmtSeconds(remaining) + '.';
+            remaining -= 1;
+        }
+        tick();
+        cooldownTimer = setInterval(tick, 1000);
+    }
+
+    // Probe server-side cooldown on load
+    fetch('/api/force_refresh_status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data && data.cooldown) cooldownSeconds = data.cooldown;
+            if (!data.allowed && data.seconds_remaining > 0) {
+                startCooldown(data.seconds_remaining);
+            } else {
+                status.textContent = '';
+            }
+        })
+        .catch(function() {});
+
+    btn.addEventListener('click', function() {
+        if (btn.disabled) return;
+        if (!confirm('Regenerate all summaries and cross-group analysis?')) return;
+        btn.disabled = true;
+        status.textContent = 'Enqueuing…';
+        fetch('/debug/force_refresh', { method: 'POST' })
+            .then(function(r) {
+                if (r.status === 429) {
+                    return r.json().then(function(data) {
+                        startCooldown(data.retry_after || 1800);
+                        throw new Error('rate_limited');
+                    });
+                }
+                return r.json();
+            })
+            .then(function(data) {
+                status.textContent = 'Refresh enqueued for ' + (data.total_groups || 0) + ' group(s). Reloading…';
+                startCooldown(cooldownSeconds);
+                setTimeout(function() { location.reload(); }, 2500);
+            })
+            .catch(function(err) {
+                if (err && err.message === 'rate_limited') return;
+                btn.disabled = false;
+                status.textContent = 'Failed to start regenerate. See console.';
+                console.error(err);
+            });
+    });
+})();
+</script>
+{% if auto_refresh %}
+<script>
+(function() {
+    var interval = setInterval(function() {
+        fetch('/api/cross_group_status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ready) {
+                    clearInterval(interval);
+                    location.reload();
+                }
+            })
+            .catch(function() {});
+    }, 10000);
+    setTimeout(function() { clearInterval(interval); }, 300000);
+})();
+</script>
+{% endif %}
+{% endblock %}

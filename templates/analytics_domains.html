@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Domain Analytics - Signal Dashboard{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom:24px;">Domain Analytics<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Domain Analytics.</strong> Stats on the domains of URLs shared in monitored groups. Shows what is trending, a multi-week chart for the top domains, and a full list. Click any domain to drill into its detail page.</span></span></h1>
+
+<!-- Trending -->
+<div class="card">
+    <h2>Trending This Week vs Last Week<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Compares each domain's link counts this week vs. the previous week. Green = rising, red = falling. Good for spotting sudden interest in a source.</span></span></h2>
+    {% if trending %}
+    <div class="table-responsive">
+    <table>
+        <thead>
+            <tr>
+                <th>Domain</th>
+                <th style="text-align:right;">This Week</th>
+                <th style="text-align:right;">Last Week</th>
+                <th style="text-align:right;">Change</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in trending %}
+            <tr>
+                <td><a href="/analytics/domains/{{ d.domain }}">{{ d.domain }}</a></td>
+                <td style="text-align:right;">{{ d.this_week }}</td>
+                <td style="text-align:right;">{{ d.last_week }}</td>
+                <td style="text-align:right;">
+                    {% if d.direction == 'up' %}
+                    <span style="color:#4caf50;">+{{ d.delta }}</span>
+                    {% elif d.direction == 'down' %}
+                    <span style="color:#ff6b6b;">{{ d.delta }}</span>
+                    {% else %}
+                    <span style="color:#666;">0</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="empty">No domain data in the last 2 weeks.</p>
+    {% endif %}
+</div>
+
+<!-- Trend Chart -->
+<div class="card">
+    <h2>Top Domains (Last 8 Weeks)<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Weekly trend lines for the five most-shared domains over the last 8 weeks. Useful for seeing which sources are becoming more or less common over time.</span></span></h2>
+    <div class="chart-container">
+        <canvas id="domainTrendChart"></canvas>
+    </div>
+</div>
+
+<!-- All Domains -->
+<div class="card">
+    <h2>All Domains<span class="help" tabindex="0" role="button" aria-label="Help">?<span class="help-body">Every domain seen in a URL, ranked by total link count, with the most recent time a link was shared. Capped at the top 100.</span></span></h2>
+    {% if all_domains %}
+    <div class="table-responsive">
+    <table>
+        <thead>
+            <tr>
+                <th class="table-rank">#</th>
+                <th>Domain</th>
+                <th style="text-align:right;">Links</th>
+                <th>Latest</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in all_domains %}
+            <tr>
+                <td class="table-rank">{{ loop.index }}</td>
+                <td><a href="/analytics/domains/{{ d.domain }}">{{ d.domain }}</a></td>
+                <td style="text-align:right;">{{ d.count }}</td>
+                <td style="white-space:nowrap;">{{ d.latest|datefmt }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="empty">No domains found.</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    Chart.defaults.color = '#999';
+    Chart.defaults.borderColor = '#333';
+
+    fetch('/api/domain_trends')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.labels || data.labels.length === 0) return;
+            new Chart(document.getElementById('domainTrendChart'), {
+                type: 'line',
+                data: { labels: data.labels, datasets: data.datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } },
+                    scales: {
+                        x: { grid: { display: false } },
+                        y: { beginAtZero: true, ticks: { precision: 0 } }
+                    }
+                }
+            });
+        })
+        .catch(function(err) { console.error('Domain trend chart error:', err); });
+</script>
+{% endblock %}

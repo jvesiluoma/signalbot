@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Search - Signal Dashboard{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom:24px;">Search<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Search.</strong> Full-text search across captured message bodies, sender names, URLs, and LLM analysis text. Narrow by date range. Use the nav bar's search box for the same thing from anywhere.</span></span></h1>
+
+<form method="GET" action="/search" style="text-align:center; margin-bottom:24px;">
+    <input type="text" name="q" value="{{ query }}" class="search-bar" placeholder="Search messages, URLs, analysis, senders..." autofocus>
+    <div class="filter-bar" style="justify-content:center; margin-top:8px;">
+        <input type="date" name="start_date" value="{{ start_date }}" title="From date">
+        <input type="date" name="end_date" value="{{ end_date }}" title="To date">
+        <button type="submit" class="btn">Search</button>
+    </div>
+</form>
+
+{% if indexing %}
+<div class="alert" style="background:rgba(0, 240, 255,0.1); border:1px solid #00f0ff; color:#00f0ff; text-align:center;">
+    Search index is being built in the background. Results may be slower until indexing completes.
+</div>
+{% endif %}
+
+{% if query %}
+<p style="text-align:center; color:#999; margin-bottom:20px;">
+    {{ total_count }} result{{ 's' if total_count != 1 else '' }} for "<strong>{{ query }}</strong>"
+    {% if total_count > 0 %}
+    &mdash;
+    <a href="/api/export/search?format=csv&q={{ query }}&start_date={{ start_date }}&end_date={{ end_date }}" class="btn btn-sm btn-outline" style="text-decoration:none;">CSV</a>
+    <a href="/api/export/search?format=json&q={{ query }}&start_date={{ start_date }}&end_date={{ end_date }}" class="btn btn-sm btn-outline" style="text-decoration:none;">JSON</a>
+    {% endif %}
+</p>
+{% endif %}
+
+{% for r in results %}
+<div class="card" style="margin-bottom:16px;">
+    <div class="entry-details" style="margin-bottom:8px;">
+        <span><strong>Time:</strong> {{ r.timestamp|datefmt }}</span>
+        <span><strong>Sender:</strong> {{ r.sender_name|highlight(query)|safe }}</span>
+        <span><strong>Group:</strong> {{ r.group_name|highlight(query)|safe }}</span>
+        <a href="/messages/{{ r.id }}" style="font-size:0.85em; color:#999;">Details</a>
+    </div>
+
+    {% if r.message %}
+    <p style="margin:6px 0;">{{ r.message[:300]|highlight(query)|safe }}{% if r.message|length > 300 %}...{% endif %}</p>
+    {% endif %}
+
+    {% if r.url %}
+    <p style="margin:4px 0;">
+        <a href="{{ r.url.split('|')[0] }}" target="_blank" rel="noreferrer">{{ r.url|highlight(query)|safe }}</a>
+    </p>
+    {% endif %}
+
+    {% if r.ai_analysis %}
+    <p style="margin:4px 0; color:#999; font-size:0.9em;">
+        <strong>AI:</strong> {{ r.ai_analysis[:300]|highlight(query)|safe }}{% if r.ai_analysis|length > 300 %}...{% endif %}
+    </p>
+    {% endif %}
+
+    {% if r.matched_caption %}
+    <p style="margin:4px 0; color:#2a9d6a; font-size:0.9em;">
+        <strong>🖼 Image/video analysis:</strong> {{ r.matched_caption[:300]|highlight(query)|safe }}{% if r.matched_caption|length > 300 %}...{% endif %}
+    </p>
+    {% endif %}
+
+    {% if r.screenshot_b64 %}
+    <img src="data:image/png;base64,{{ r.screenshot_b64 }}" alt="Screenshot" style="max-height:150px; margin-top:8px; border-radius:5px;">
+    {% endif %}
+</div>
+{% else %}
+    {% if query %}
+    <p class="empty">No results found for "{{ query }}".</p>
+    {% else %}
+    <p class="empty">Enter a search term to find messages, URLs, AI analysis, and more.</p>
+    {% endif %}
+{% endfor %}
+
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="/search?q={{ query }}&page={{ page - 1 }}&start_date={{ start_date }}&end_date={{ end_date }}">&laquo; Previous</a>
+    {% endif %}
+    <span class="current">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="/search?q={{ query }}&page={{ page + 1 }}&start_date={{ start_date }}&end_date={{ end_date }}">Next &raquo;</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Links & Analysis - Signal Dashboard{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom:24px;">Links &amp; Analysis<span class="help" tabindex="0" role="button" aria-label="About this page">?<span class="help-body"><strong>Links &amp; Analysis.</strong> Every message that contained a URL, with its screenshot and the LLM-generated analysis of the linked page. Narrow by date range. Useful for reviewing what was shared and the AI's summary of the target content.</span></span></h1>
+
+<form method="GET" action="/filtered" class="filter-bar">
+    <input type="date" name="start_date" value="{{ start_date }}" title="From date">
+    <input type="date" name="end_date" value="{{ end_date }}" title="To date">
+    <button type="submit" class="btn">Filter</button>
+    {% if start_date or end_date %}
+    <a href="/filtered" style="font-size:0.9em;">Reset</a>
+    {% endif %}
+    <span class="result-count">{{ total_count }} link{{ 's' if total_count != 1 else '' }}</span>
+</form>
+
+<input type="text" id="searchInput" class="search-bar" placeholder="Filter by URL or AI Analysis...">
+
+{% if results|length == 0 %}
+    <p class="empty">No messages with URLs found in the selected date range.</p>
+{% endif %}
+
+<div id="entriesContainer">
+    {% for item in results %}
+    <div class="entry">
+        <div class="entry-details">
+            <span>{{ item.platform|platform_badge }}</span>
+            <span><strong>Time:</strong> {{ item.timestamp|datefmt }}</span>
+            <span><strong>Sender:</strong> {% if item.sender_phone %}<a href="/intel/dossier/{{ item.sender_phone|urlencode }}" class="sender-link">{{ item.sender_name }}</a>{% else %}{{ item.sender_name }}{% endif %}</span>
+            <span><strong>Group:</strong> {{ item.group_name }}</span>
+            <span>
+                <a href="{{ item.url }}" target="_blank" rel="noreferrer">{{ item.url }}</a>
+            </span>
+            <a href="/messages/{{ item.id }}" style="font-size:0.85em; color:#999;">Details</a>
+        </div>
+        {% if item.has_screenshot %}
+            <img src="/api/screenshot/{{ item.id }}" alt="Screenshot" loading="lazy" onclick="showOverlay(this.src)">
+        {% endif %}
+        <p><strong>AI Analysis:</strong> {{ item.ai_analysis }}</p>
+        {% if item.attachment_caption %}
+            <p class="ai-caption">🖼 {{ item.attachment_caption }}</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="/filtered?page={{ page - 1 }}&start_date={{ start_date }}&end_date={{ end_date }}">&laquo; Previous</a>
+    {% endif %}
+    <span class="current">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="/filtered?page={{ page + 1 }}&start_date={{ start_date }}&end_date={{ end_date }}">Next &raquo;</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{# Image lightbox is provided globally by base.html (showOverlay/hideOverlay). #}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const searchInput = document.getElementById('searchInput');
+    searchInput.addEventListener('keyup', function() {
+        const filter = searchInput.value.toLowerCase();
+        const entries = document.querySelectorAll('.entry');
+        entries.forEach(function(entry) {
+            const link = entry.querySelector('a');
+            const urlText = link ? link.textContent.toLowerCase() : '';
+            const p = entry.querySelector('p');
+            const analysisText = p ? p.textContent.toLowerCase() : '';
+            entry.style.display = (urlText.includes(filter) || analysisText.includes(filter)) ? '' : 'none';
+        });
+    });
+</script>
+{% endblock %}

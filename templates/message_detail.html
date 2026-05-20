@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Message #{{ msg.id }} - Signal Dashboard{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:16px;">
+    <a href="/messages" style="font-size:0.9em;">&laquo; Back to Messages</a>
+</div>
+
+<div class="card">
+    <h2>Message #{{ msg.id }}</h2>
+    <div class="entry-details" style="margin-bottom:16px;">
+        <span><strong>Time:</strong> {{ msg.timestamp|datefmt }}</span>
+        <span><strong>Sender:</strong> {{ msg.sender_name }}{% if msg.sender_phone %} ({{ msg.sender_phone }}){% endif %}</span>
+        <span><strong>Group:</strong> {{ msg.group_name }}</span>
+    </div>
+
+    {% if msg.message %}
+    <div style="background:#252525; padding:16px; border-radius:8px; margin-bottom:16px; line-height:1.6; word-break:break-word;">
+        {{ msg.message }}
+    </div>
+    {% else %}
+    <p style="color:#666; font-style:italic;">No message text.</p>
+    {% endif %}
+</div>
+
+{% if msg.urls %}
+<div class="card">
+    <h2>URLs</h2>
+    {% for u in msg.urls %}
+    <div style="margin-bottom:10px; word-break:break-all;">
+        <a href="{{ u }}" target="_blank" rel="noreferrer">{{ u }}</a>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if msg.ai_analysis %}
+<div class="card">
+    <h2>AI Analysis</h2>
+    <div style="line-height:1.6; color:#ccc;">
+        {{ msg.ai_analysis }}
+    </div>
+</div>
+{% endif %}
+
+{% if msg.has_screenshot %}
+<div class="card">
+    <h2>Screenshot</h2>
+    <img src="/api/screenshot/{{ msg.id }}" alt="Screenshot" loading="lazy"
+         style="max-width:100%; border-radius:6px; cursor:pointer;"
+         onclick="showOverlay(this.src)">
+</div>
+{% endif %}
+
+{% if attachments %}
+<div class="card">
+    <h2>Attachments</h2>
+    {% for att in attachments %}
+    <div style="margin-bottom:16px;">
+        {% if att.preview_id and att.media_type == 'image' %}
+            <img src="/attachments/preview/{{ att.preview_id }}" alt="{{ att.file_name }}"
+                 loading="lazy"
+                 style="max-width:100%; max-height:320px; border-radius:6px; cursor:pointer;"
+                 onclick="showOverlay(this.src)">
+        {% elif att.preview_id and att.media_type == 'video' %}
+            <video controls preload="metadata"
+                   style="max-width:100%; max-height:400px; border-radius:6px;">
+                <source src="/attachments/preview/{{ att.preview_id }}">
+            </video>
+        {% else %}
+            <p style="color:#999;">{{ att.file_name or att.content_type or 'attachment' }}</p>
+        {% endif %}
+        {% if att.ai_caption %}
+            <p class="ai-caption">🖼 {{ att.ai_caption }}</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if snapshots %}
+<div class="card">
+    <h2>Page Snapshots</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>URL</th>
+                <th>Captured</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for snap in snapshots %}
+            <tr>
+                <td style="word-break:break-all;">{{ snap.url|domain }}</td>
+                <td style="white-space:nowrap;">{{ snap.captured_at|datefmt }}</td>
+                <td style="white-space:nowrap;">
+                    <a href="/pages/view/{{ snap.id }}">View</a>
+                    &middot;
+                    <a href="/pages?url={{ snap.url|urlencode }}">History</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{# Image lightbox is provided globally by base.html (showOverlay/hideOverlay). #}
+{% endblock %}

@@ -1,0 +1,201 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# signalbot — full observation stack
+#
+#   docker compose up --build          # brings up everything in COMPOSE_PROFILES
+#
+# Every bundled dependency is OPTIONAL: drop its profile name from COMPOSE_PROFILES
+# (set in .env) and point the matching *_BASE / DB_HOST / OLLAMA_API_URL at an
+# already-running external instance instead. The `signalbot` service itself has
+# no profile, so it always runs.
+#
+# Profiles (default in .env.example: "db,signal" — add the rest as you need them):
+#   db                 -> bundled MySQL                (else set DB_HOST=…)
+#   signal             -> bundled signal-cli-rest-api  (else set SIGNAL_API_BASE=…)
+#   telegram           -> bundled Telegram Bot-API connector  (connectors/telegram/)
+#   whatsapp           -> bundled WhatsApp (Baileys) connector (connectors/whatsapp/)
+#   ollama             -> bundled Ollama (GPU-heavy; OFF by default)
+#   telegram-local-api -> bundled official local Telegram Bot API server (OFF by default)
+#
+# Only services whose profile is active are built/started. The messaging
+# platforms are configured AFTER the stack is up — via the /settings web page —
+# so an empty/partial .env must never break `docker compose up`: every variable
+# referenced below has a `:-` default, never a `:?` "required" guard.
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── The application (always runs) ─────────────────────────────────────────
+  signalbot:
+    build: .
+    image: signalbot:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Container timezone — the poller stores Signal timestamps as local
+      # wall-clock time, so set TZ in .env (e.g. Europe/Helsinki) for the
+      # dashboard to show the right times. Defaults to UTC.
+      TZ: "${TZ:-UTC}"
+    ports:
+      - "${PORT:-5581}:5581"
+    volumes:
+      # signal-cli's data dir, mounted read-only at /signal-cli-data so the
+      # recipient-sync worker can read account.db without a Docker socket. Point
+      # SIGNAL_CLI_DB_LOCAL_PATH (in .env) at account.db *inside* this mount.
+      #   - default: the bundled `signal-cli-data` named volume — the bundled
+      #     `signal` profile writes to it; empty/no-op when that profile is off.
+      #   - external signal-api: set SIGNAL_CLI_DATA_DIR in .env to an ABSOLUTE
+      #     host path (e.g. /root/.local/share/signal-api) to bind-mount it here.
+      #     A non-existent path is silently created root-owned & empty, so a typo
+      #     just yields an empty mount (the worker no-ops, no crash).
+      - ${SIGNAL_CLI_DATA_DIR:-signal-cli-data}:/signal-cli-data:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+        required: false
+    networks: [signalnet]
+
+  # ── MySQL (profile: db) ───────────────────────────────────────────────────
+  # The self-contained database for the app. `DB_HOST=mysql` in .env points the
+  # app at it over the `signalnet` network. To migrate an existing external DB
+  # into it, see scripts/migrate-db-to-bundled-mysql.sh.
+  mysql:
+    image: mysql:8.0
+    profiles: ["db"]
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: "${DB_NAME:-messages_db}"
+      MYSQL_USER: "${DB_USER:-signalbot}"
+      MYSQL_PASSWORD: "${DB_PASSWORD:-changeme}"
+      MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:-changeme}"
+      TZ: "${TZ:-UTC}"
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_0900_ai_ci
+      --max-allowed-packet=256M
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # Loaded only on first init of an empty data dir.
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    # Uncomment to reach this DB from the host (e.g. for an external mysql client
+    # or a manual dump/restore). Not needed by the app or the migration script.
+    # ports:
+    #   - "127.0.0.1:3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${DB_ROOT_PASSWORD:-changeme}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [signalnet]
+
+  # ── Signal REST API sidecar (profile: signal) ─────────────────────────────
+  # Holds the linked Signal session. Link it once via the QR endpoint:
+  #   curl -s 'http://localhost:8080/v1/qrcodelink?device_name=signal-api' --output qr.png
+  signal-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    profiles: ["signal"]
+    restart: unless-stopped
+    environment:
+      MODE: "normal"
+      TZ: "${TZ:-UTC}"
+    ports:
+      - "8080:8080"
+    volumes:
+      - signal-cli-data:/home/.local/share/signal-cli
+    networks: [signalnet]
+
+  # ── Telegram connector — Bot API only (profile: telegram) ─────────────────
+  # Read-only, low-profile bot. Disable BotFather privacy mode so it sees all
+  # group messages; add it as a channel admin to read channel posts. Built from
+  # ./connectors/telegram only when the `telegram` profile is active; you supply
+  # the bot token afterwards via the /settings page (then restart the stack).
+  tg-connector:
+    build: ./connectors/telegram
+    image: signalbot-tg-connector:local
+    profiles: ["telegram"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Defaults wired to the in-compose services; override in .env.
+      INGEST_URL: "${TG_INGEST_URL:-http://signalbot:5581/ingest/telegram}"
+      TG_BOT_API_BASE: "${TG_BOT_API_BASE:-https://api.telegram.org}"
+      CONNECTOR_PORT: "8081"
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - tg-state:/data
+    networks: [signalnet]
+
+  # ── WhatsApp connector — custom Baileys service (profile: whatsapp) ───────
+  # Holds the WhatsApp linked-device session in the wa-session volume. Built from
+  # ./connectors/whatsapp only when the `whatsapp` profile is active. Pair the
+  # device after the stack is up — from the /settings page (it proxies the
+  # connector's QR), or read the QR from `docker compose logs wa-connector`.
+  wa-connector:
+    build: ./connectors/whatsapp
+    image: signalbot-wa-connector:local
+    profiles: ["whatsapp"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      INGEST_URL: "${WA_INGEST_URL:-http://signalbot:5581/ingest/whatsapp}"
+      CONNECTOR_PORT: "8082"
+      SESSION_DIR: "/data/session"
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - wa-session:/data/session
+    # Uncomment to expose the QR pairing page on the host during setup:
+    # ports:
+    #   - "127.0.0.1:8082:8082"
+    networks: [signalnet]
+
+  # ── Ollama (profile: ollama) — OFF by default; usually external ───────────
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    restart: unless-stopped
+    environment:
+      TZ: "${TZ:-UTC}"
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks: [signalnet]
+    # For GPU acceleration, add (Docker with NVIDIA Container Toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ── Official local Telegram Bot API server (profile: telegram-local-api) ──
+  # Optional. Higher rate limits + large-file downloads. When you enable this
+  # profile, set TG_API_ID / TG_API_HASH (from https://my.telegram.org) and
+  # TG_BOT_API_BASE=http://telegram-bot-api:8081 in .env. The defaults below are
+  # empty so an unset .env never breaks interpolation for everyone else — this
+  # container only runs under the `telegram-local-api` profile, and it (rightly)
+  # refuses to start without real values, which is the place to find out.
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    profiles: ["telegram-local-api"]
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: "${TG_API_ID:-}"
+      TELEGRAM_API_HASH: "${TG_API_HASH:-}"
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - telegram-bot-api-data:/var/lib/telegram-bot-api
+    networks: [signalnet]
+
+networks:
+  signalnet:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  signal-cli-data:
+  tg-state:
+  wa-session:
+  ollama-models:
+  telegram-bot-api-data:

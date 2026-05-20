@@ -1,0 +1,42 @@
+# Version control / editor
+.git
+.gitignore
+.DS_Store
+.claude
+
+# Local environment — never bake secrets into the image
+.env
+
+# Python caches / artifacts
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+
+# Logs and runtime debris
+*.log
+debuglog.txt
+qr.png
+
+# DB dumps / migration exports (e.g. from scripts/migrate-db-to-bundled-mysql.sh
+# or scripts/dedup-messages.sql backups) — multi-GB, never bake into the image.
+# schema.sql is the lone exception (small DDL, kept for reference).
+*.sql
+!schema.sql
+
+# Raw intel dumps (see .gitignore) — never copy into the image
+*.json
+envelope-*.json
+envelopes-*.json
+envelope_dump*
+groupsync-*.json
+groups-*.json
+raw_envelope*
+*.envelope.json
+
+# Deprecated copies
+old/
+obsolete/
+
+# Plans / scratch docs are fine to keep out of the image
+docs/
